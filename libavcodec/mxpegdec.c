@@ -258,10 +258,15 @@ int ff_mxpeg_decode_frame(AVCodecContext *avctx,
                     if (mxpeg_check_dimensions(s, jpg, reference_ptr) < 0)
                         break;
 
-                    if (reference_ptr->data[0])
-                        ff_mjpeg_decode_sos(jpg, s->mxm_bitmask, reference_ptr);
-                    else
-                        ff_mjpeg_decode_sos(jpg, s->mxm_bitmask, NULL);
+                    if (!reference_ptr->data[0]) {
+                        /* allocate dummy reference picture */
+                        if (avctx->get_buffer(avctx, reference_ptr) < 0) {
+                            av_log(avctx, AV_LOG_ERROR, "get_buffer() failed\n");
+                            return AVERROR(ENOMEM);
+                        }
+                    }
+
+                    ff_mjpeg_decode_sos(jpg, s->mxm_bitmask, reference_ptr);
                 } else {
                     ff_mjpeg_decode_sos(jpg, NULL, NULL);
                 }

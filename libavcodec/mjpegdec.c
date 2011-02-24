@@ -826,8 +826,6 @@ static int mjpeg_decode_scan(MJpegDecodeContext *s, int nb_components, int Ah, i
     for(mb_y = 0; mb_y < s->mb_height; mb_y++) {
         for(mb_x = 0; mb_x < s->mb_width; mb_x++) {
             const int copy_mb = mb_bitmask && !get_bits1(&mb_bitmask_gb);
-            if (copy_mb && !reference)
-                continue;
 
             if (s->restart_interval && !s->restart_count)
                 s->restart_count = s->restart_interval;
