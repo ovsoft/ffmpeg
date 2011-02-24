@@ -925,8 +925,6 @@ static int mjpeg_decode_scan_progressive_ac(MJpegDecodeContext *s, int ss, int s
         uint8_t *last_nnz = &s->last_nnz[c][block_idx];
         for(mb_x = 0; mb_x < s->mb_width; mb_x++, block++, last_nnz++) {
             const int copy_mb = mb_bitmask && !get_bits1(&mb_bitmask_gb);
-            if (copy_mb && !reference)
-                continue;
 
             if (!copy_mb) {
             int ret;
