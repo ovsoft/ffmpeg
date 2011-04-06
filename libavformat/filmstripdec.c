@@ -40,10 +40,10 @@ static int read_header(AVFormatContext *s,
     AVIOContext *pb = s->pb;
     AVStream *st;
 
-    if (url_is_streamed(s->pb))
+    if (!s->pb->seekable)
         return AVERROR(EIO);
 
-    url_fseek(pb, url_fsize(pb) - 36, SEEK_SET);
+    avio_seek(pb, avio_size(pb) - 36, SEEK_SET);
     if (avio_rb32(pb) != RAND_TAG) {
         av_log(s, AV_LOG_ERROR, "magic number not found");
         return AVERROR_INVALIDDATA;
@@ -59,7 +59,7 @@ static int read_header(AVFormatContext *s,
         return AVERROR_INVALIDDATA;
     }
 
-    url_fskip(pb, 2);
+    avio_skip(pb, 2);
     st->codec->codec_type = AVMEDIA_TYPE_VIDEO;
     st->codec->codec_id   = CODEC_ID_RAWVIDEO;
     st->codec->pix_fmt    = PIX_FMT_RGBA;
@@ -69,7 +69,7 @@ static int read_header(AVFormatContext *s,
     film->leading         = avio_rb16(pb);
     av_set_pts_info(st, 64, 1, avio_rb16(pb));
 
-    url_fseek(pb, 0, SEEK_SET);
+    avio_seek(pb, 0, SEEK_SET);
 
     return 0;
 }
@@ -82,9 +82,9 @@ static int read_packet(AVFormatContext *s,
 
     if (url_feof(s->pb))
         return AVERROR(EIO);
-    pkt->dts = url_ftell(s->pb) / (st->codec->width * (st->codec->height + film->leading) * 4);
+    pkt->dts = avio_tell(s->pb) / (st->codec->width * (st->codec->height + film->leading) * 4);
     pkt->size = av_get_packet(s->pb, pkt, st->codec->width * st->codec->height * 4);
-    url_fskip(s->pb, st->codec->width * film->leading * 4);
+    avio_skip(s->pb, st->codec->width * film->leading * 4);
     if (pkt->size < 0)
         return pkt->size;
     pkt->flags |= AV_PKT_FLAG_KEY;
@@ -94,7 +94,7 @@ static int read_packet(AVFormatContext *s,
 static int read_seek(AVFormatContext *s, int stream_index, int64_t timestamp, int flags)
 {
     AVStream *st = s->streams[stream_index];
-    url_fseek(s->pb, FFMAX(timestamp, 0) * st->codec->width * st->codec->height * 4, SEEK_SET);
+    avio_seek(s->pb, FFMAX(timestamp, 0) * st->codec->width * st->codec->height * 4, SEEK_SET);
     return 0;
 }
 

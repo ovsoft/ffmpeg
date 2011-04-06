@@ -366,6 +366,7 @@ void avcodec_default_release_buffer(AVCodecContext *s, AVFrame *pic){
     assert(pic->type==FF_BUFFER_TYPE_INTERNAL);
     assert(s->internal_buffer_count);
 
+    if(s->internal_buffer){
     buf = NULL; /* avoids warning */
     for(i=0; i<s->internal_buffer_count; i++){ //just 3-5 checks so is not worth to optimize
         buf= &((InternalBuffer*)s->internal_buffer)[i];
@@ -377,6 +378,7 @@ void avcodec_default_release_buffer(AVCodecContext *s, AVFrame *pic){
     last = &((InternalBuffer*)s->internal_buffer)[s->internal_buffer_count];
 
     FFSWAP(InternalBuffer, *buf, *last);
+    }
 
     for(i=0; i<4; i++){
         pic->data[i]=NULL;
@@ -453,7 +455,7 @@ enum PixelFormat avcodec_default_get_format(struct AVCodecContext *s, const enum
 void avcodec_get_frame_defaults(AVFrame *pic){
     memset(pic, 0, sizeof(AVFrame));
 
-    pic->pts= AV_NOPTS_VALUE;
+    pic->pts = pic->best_effort_timestamp = AV_NOPTS_VALUE;
     pic->key_frame= 1;
 }
 
@@ -539,7 +541,7 @@ int attribute_align_arg avcodec_open(AVCodecContext *avctx, AVCodec *codec)
     avctx->frame_number = 0;
 
     if (HAVE_THREADS && !avctx->thread_opaque) {
-        ret = ff_thread_init(avctx, avctx->thread_count);
+        ret = ff_thread_init(avctx);
         if (ret < 0) {
             goto free_and_end;
         }
@@ -561,12 +563,18 @@ int attribute_align_arg avcodec_open(AVCodecContext *avctx, AVCodec *codec)
         }
     }
 
+    avctx->pts_correction_num_faulty_pts =
+    avctx->pts_correction_num_faulty_dts = 0;
+    avctx->pts_correction_last_pts =
+    avctx->pts_correction_last_dts = INT64_MIN;
+
     if(avctx->codec->init && !(avctx->active_thread_type&FF_THREAD_FRAME)){
         ret = avctx->codec->init(avctx);
         if (ret < 0) {
             goto free_and_end;
         }
     }
+
     ret=0;
 end:
     entangled_thread_counter--;
@@ -631,6 +639,39 @@ int avcodec_encode_subtitle(AVCodecContext *avctx, uint8_t *buf, int buf_size,
     return ret;
 }
 
+/**
+ * Attempt to guess proper monotonic timestamps for decoded video frames
+ * which might have incorrect times. Input timestamps may wrap around, in
+ * which case the output will as well.
+ *
+ * @param pts the pts field of the decoded AVPacket, as passed through
+ * AVFrame.pkt_pts
+ * @param dts the dts field of the decoded AVPacket
+ * @return one of the input values, may be AV_NOPTS_VALUE
+ */
+static int64_t guess_correct_pts(AVCodecContext *ctx,
+                                 int64_t reordered_pts, int64_t dts)
+{
+    int64_t pts = AV_NOPTS_VALUE;
+
+    if (dts != AV_NOPTS_VALUE) {
+        ctx->pts_correction_num_faulty_dts += dts <= ctx->pts_correction_last_dts;
+        ctx->pts_correction_last_dts = dts;
+    }
+    if (reordered_pts != AV_NOPTS_VALUE) {
+        ctx->pts_correction_num_faulty_pts += reordered_pts <= ctx->pts_correction_last_pts;
+        ctx->pts_correction_last_pts = reordered_pts;
+    }
+    if ((ctx->pts_correction_num_faulty_pts<=ctx->pts_correction_num_faulty_dts || dts == AV_NOPTS_VALUE)
+       && reordered_pts != AV_NOPTS_VALUE)
+        pts = reordered_pts;
+    else
+        pts = dts;
+
+    return pts;
+}
+
+
 #if FF_API_VIDEO_OLD
 int attribute_align_arg avcodec_decode_video(AVCodecContext *avctx, AVFrame *picture,
                          int *got_picture_ptr,
@@ -671,8 +712,13 @@ int attribute_align_arg avcodec_decode_video2(AVCodecContext *avctx, AVFrame *pi
 
         emms_c(); //needed to avoid an emms_c() call before every return;
 
-        if (*got_picture_ptr)
+
+        if (*got_picture_ptr){
             avctx->frame_number++;
+            picture->best_effort_timestamp = guess_correct_pts(avctx,
+                                                            picture->pkt_pts,
+                                                            picture->pkt_dts);
+        }
     }else
         ret= 0;
 
@@ -1147,8 +1193,7 @@ int av_get_bits_per_sample_format(enum AVSampleFormat sample_fmt) {
 #endif
 
 #if !HAVE_THREADS
-int ff_thread_init(AVCodecContext *s, int thread_count){
-    s->thread_count = thread_count;
+int ff_thread_init(AVCodecContext *s){
     return -1;
 }
 #endif
@@ -1255,9 +1300,9 @@ int av_lockmgr_register(int (*cb)(void **mutex, enum AVLockOp op))
 unsigned int ff_toupper4(unsigned int x)
 {
     return     toupper( x     &0xFF)
-            + (toupper((x>>8 )&0xFF)<<8 )
-            + (toupper((x>>16)&0xFF)<<16)
-            + (toupper((x>>24)&0xFF)<<24);
+    + (toupper((x>>8 )&0xFF)<<8 )
+    + (toupper((x>>16)&0xFF)<<16)
+    + (toupper((x>>24)&0xFF)<<24);
 }
 
 #if !HAVE_PTHREADS
@@ -1291,7 +1336,8 @@ void ff_thread_await_progress(AVFrame *f, int progress, int field)
 
 int avcodec_thread_init(AVCodecContext *s, int thread_count)
 {
-    return ff_thread_init(s, thread_count);
+    s->thread_count = thread_count;
+    return ff_thread_init(s);
 }
 
 void avcodec_thread_free(AVCodecContext *s)

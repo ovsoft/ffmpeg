@@ -5,6 +5,13 @@ Below is a list of the people maintaining different parts of the
 FFmpeg code.
 
 
+Project Leader
+==============
+
+Michael Niedermayer
+  final design decisions
+
+
 Applications
 ============
 
@@ -118,6 +125,7 @@ Codecs:
   cinepak.c                             Roberto Togni
   cljr                                  Alex Beregszaszi
   cook.c, cookdata.h                    Benjamin Larsson
+  crystalhd.c                           Philip Langdale
   cscd.c                                Reimar Doeffinger
   dca.c                                 Kostya Shishkov, Benjamin Larsson
   dnxhd*                                Baptiste Coudurier
@@ -143,6 +151,7 @@ Codecs:
   interplayvideo.c                      Mike Melanson
   ivi*                                  Kostya Shishkov
   jpeg_ls.c                             Kostya Shishkov
+  jvdec.c                               Peter Ross
   kmvc.c                                Kostya Shishkov
   lcl*.c                                Roberto Togni, Reimar Doeffinger
   libgsm.c                              Michel Bardiaux
@@ -190,7 +199,7 @@ Codecs:
   smc.c                                 Mike Melanson
   snow.c                                Michael Niedermayer, Loren Merritt
   sonic.c                               Alex Beregszaszi
-  srtdec.c                              Aurelien Jacobs
+  srt*                                  Aurelien Jacobs
   sunrast.c                             Ivo van Poorten
   svq3.c                                Michael Niedermayer
   targa.c                               Kostya Shishkov
@@ -224,6 +233,7 @@ Codecs:
   zmbv*                                 Kostya Shishkov
 
 Hardware acceleration:
+  crystalhd.c                           Philip Langdale
   dxva2*                                Laurent Aimar
   vaapi*                                Gwenole Beauchesne
   vdpau*                                Carl Eugen Hoyos
@@ -276,6 +286,7 @@ Muxers/Demuxers:
   ipmovie.c                             Mike Melanson
   img2.c                                Michael Niedermayer
   iss.c                                 Stefan Gehrer
+  jvdec.c                               Peter Ross
   libnut.c                              Oded Shimon
   lmlm4.c                               Ivo van Poorten
   lxfdec.c                              Tomas Härdin
@@ -283,6 +294,7 @@ Muxers/Demuxers:
   matroskadec.c                         Aurelien Jacobs
   matroskaenc.c                         David Conrad
   metadata*                             Aurelien Jacobs
+  microdvd*                             Aurelien Jacobs
   mm.c                                  Peter Ross
   mov.c                                 Michael Niedermayer, Baptiste Coudurier
   movenc.c                              Michael Niedermayer, Baptiste Coudurier

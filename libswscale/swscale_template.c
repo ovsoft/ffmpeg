@@ -2215,7 +2215,7 @@ static inline void RENAME(hScale)(int16_t *dst, int dstW, const uint8_t *src, in
 
 //FIXME all pal and rgb srcFormats could do this convertion as well
 //FIXME all scalers more complex than bilinear could do half of this transform
-static void RENAME(chrRangeToJpeg)(uint16_t *dst, int width)
+static void RENAME(chrRangeToJpeg)(int16_t *dst, int width)
 {
     int i;
     for (i = 0; i < width; i++) {
@@ -2223,7 +2223,7 @@ static void RENAME(chrRangeToJpeg)(uint16_t *dst, int width)
         dst[i+VOFW] = (FFMIN(dst[i+VOFW],30775)*4663 - 9289992)>>12; //-264
     }
 }
-static void RENAME(chrRangeFromJpeg)(uint16_t *dst, int width)
+static void RENAME(chrRangeFromJpeg)(int16_t *dst, int width)
 {
     int i;
     for (i = 0; i < width; i++) {
@@ -2231,13 +2231,13 @@ static void RENAME(chrRangeFromJpeg)(uint16_t *dst, int width)
         dst[i+VOFW] = (dst[i+VOFW]*1799 + 4081085)>>11; //1469
     }
 }
-static void RENAME(lumRangeToJpeg)(uint16_t *dst, int width)
+static void RENAME(lumRangeToJpeg)(int16_t *dst, int width)
 {
     int i;
     for (i = 0; i < width; i++)
         dst[i] = (FFMIN(dst[i],30189)*19077 - 39057361)>>14;
 }
-static void RENAME(lumRangeFromJpeg)(uint16_t *dst, int width)
+static void RENAME(lumRangeFromJpeg)(int16_t *dst, int width)
 {
     int i;
     for (i = 0; i < width; i++)
@@ -2966,6 +2966,8 @@ static void RENAME(sws_init_swScale)(SwsContext *c)
         switch(srcFormat) {
         case PIX_FMT_RGB48BE:
         case PIX_FMT_RGB48LE: c->chrToYV12 = rgb48ToUV_half; break;
+        case PIX_FMT_BGR48BE:
+        case PIX_FMT_BGR48LE: c->chrToYV12 = bgr48ToUV_half; break;
         case PIX_FMT_RGB32  : c->chrToYV12 = bgr32ToUV_half;  break;
         case PIX_FMT_RGB32_1: c->chrToYV12 = bgr321ToUV_half; break;
         case PIX_FMT_BGR24  : c->chrToYV12 = RENAME(bgr24ToUV_half); break;
@@ -2981,6 +2983,8 @@ static void RENAME(sws_init_swScale)(SwsContext *c)
         switch(srcFormat) {
         case PIX_FMT_RGB48BE:
         case PIX_FMT_RGB48LE: c->chrToYV12 = rgb48ToUV; break;
+        case PIX_FMT_BGR48BE:
+        case PIX_FMT_BGR48LE: c->chrToYV12 = bgr48ToUV; break;
         case PIX_FMT_RGB32  : c->chrToYV12 = bgr32ToUV;  break;
         case PIX_FMT_RGB32_1: c->chrToYV12 = bgr321ToUV; break;
         case PIX_FMT_BGR24  : c->chrToYV12 = RENAME(bgr24ToUV); break;
@@ -3027,6 +3031,8 @@ static void RENAME(sws_init_swScale)(SwsContext *c)
     case PIX_FMT_BGR32_1: c->lumToYV12 = rgb321ToY; break;
     case PIX_FMT_RGB48BE:
     case PIX_FMT_RGB48LE: c->lumToYV12 = rgb48ToY; break;
+    case PIX_FMT_BGR48BE:
+    case PIX_FMT_BGR48LE: c->lumToYV12 = bgr48ToY; break;
     }
     if (c->alpPixBuf) {
         switch (srcFormat) {
@@ -3047,6 +3053,7 @@ static void RENAME(sws_init_swScale)(SwsContext *c)
         c->alpSrcOffset = 3;
         break;
     case PIX_FMT_RGB48LE:
+    case PIX_FMT_BGR48LE:
         c->lumSrcOffset = 1;
         c->chrSrcOffset = 1;
         c->alpSrcOffset = 1;

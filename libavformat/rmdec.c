@@ -131,17 +131,17 @@ static int rm_read_audio_stream_info(AVFormatContext *s, AVIOContext *pb,
     version = avio_rb16(pb); /* version */
     if (version == 3) {
         int header_size = avio_rb16(pb);
-        int64_t startpos = url_ftell(pb);
-        url_fskip(pb, 14);
+        int64_t startpos = avio_tell(pb);
+        avio_skip(pb, 14);
         rm_read_metadata(s, 0);
-        if ((startpos + header_size) >= url_ftell(pb) + 2) {
+        if ((startpos + header_size) >= avio_tell(pb) + 2) {
             // fourcc (should always be "lpcJ")
             avio_r8(pb);
             get_str8(pb, buf, sizeof(buf));
         }
         // Skip extra header crap (this should never happen)
-        if ((startpos + header_size) > url_ftell(pb))
-            url_fskip(pb, header_size + startpos - url_ftell(pb));
+        if ((startpos + header_size) > avio_tell(pb))
+            avio_skip(pb, header_size + startpos - avio_tell(pb));
         st->codec->sample_rate = 8000;
         st->codec->channels = 1;
         st->codec->codec_type = AVMEDIA_TYPE_AUDIO;
@@ -150,7 +150,7 @@ static int rm_read_audio_stream_info(AVFormatContext *s, AVIOContext *pb,
         int flavor, sub_packet_h, coded_framesize, sub_packet_size;
         int codecdata_length;
         /* old version (4) */
-        url_fskip(pb, 2); /* unused */
+        avio_skip(pb, 2); /* unused */
         avio_rb32(pb); /* .ra4 */
         avio_rb32(pb); /* data size */
         avio_rb16(pb); /* version2 */
@@ -273,7 +273,7 @@ ff_rm_read_mdpr_codecdata (AVFormatContext *s, AVIOContext *pb,
     int ret;
 
     av_set_pts_info(st, 64, 1, 1000);
-    codec_pos = url_ftell(pb);
+    codec_pos = avio_tell(pb);
     v = avio_rb32(pb);
     if (v == MKTAG(0xfd, 'a', 'r', '.')) {
         /* ra type header */
@@ -301,7 +301,7 @@ ff_rm_read_mdpr_codecdata (AVFormatContext *s, AVIOContext *pb,
         fps2= avio_rb16(pb);
         avio_rb16(pb);
 
-        if ((ret = rm_read_extradata(pb, st->codec, codec_data_size - (url_ftell(pb) - codec_pos))) < 0)
+        if ((ret = rm_read_extradata(pb, st->codec, codec_data_size - (avio_tell(pb) - codec_pos))) < 0)
             return ret;
 
 //        av_log(s, AV_LOG_DEBUG, "fps= %d fps2= %d\n", fps, fps2);
@@ -320,8 +320,8 @@ ff_rm_read_mdpr_codecdata (AVFormatContext *s, AVIOContext *pb,
 
 skip:
     /* skip codec info */
-    size = url_ftell(pb) - codec_pos;
-    url_fskip(pb, codec_data_size - size);
+    size = avio_tell(pb) - codec_pos;
+    avio_skip(pb, codec_data_size - size);
 
     return 0;
 }
@@ -340,7 +340,7 @@ static int rm_read_index(AVFormatContext *s)
         size     = avio_rb32(pb);
         if (size < 20)
             return -1;
-        url_fskip(pb, 2);
+        avio_skip(pb, 2);
         n_pkts   = avio_rb32(pb);
         str_id   = avio_rb16(pb);
         next_off = avio_rb32(pb);
@@ -353,17 +353,17 @@ static int rm_read_index(AVFormatContext *s)
             goto skip;
 
         for (n = 0; n < n_pkts; n++) {
-            url_fskip(pb, 2);
+            avio_skip(pb, 2);
             pts = avio_rb32(pb);
             pos = avio_rb32(pb);
-            url_fskip(pb, 4); /* packet no. */
+            avio_skip(pb, 4); /* packet no. */
 
             av_add_index_entry(st, pos, pts, 0, 0, AVINDEX_KEYFRAME);
         }
 
 skip:
-        if (next_off && url_ftell(pb) != next_off &&
-            url_fseek(pb, next_off, SEEK_SET) < 0)
+        if (next_off && avio_tell(pb) != next_off &&
+            avio_seek(pb, next_off, SEEK_SET) < 0)
             return -1;
     } while (next_off);
 
@@ -469,7 +469,7 @@ static int rm_read_header(AVFormatContext *s, AVFormatParameters *ap)
             goto header_end;
         default:
             /* unknown tag: skip it */
-            url_fskip(pb, tag_size - 10);
+            avio_skip(pb, tag_size - 10);
             break;
         }
     }
@@ -480,11 +480,11 @@ static int rm_read_header(AVFormatContext *s, AVFormatParameters *ap)
     avio_rb32(pb); /* next data header */
 
     if (!data_off)
-        data_off = url_ftell(pb) - 18;
-    if (indx_off && !url_is_streamed(pb) && !(s->flags & AVFMT_FLAG_IGNIDX) &&
-        url_fseek(pb, indx_off, SEEK_SET) >= 0) {
+        data_off = avio_tell(pb) - 18;
+    if (indx_off && pb->seekable && !(s->flags & AVFMT_FLAG_IGNIDX) &&
+        avio_seek(pb, indx_off, SEEK_SET) >= 0) {
         rm_read_index(s);
-        url_fseek(pb, data_off + 18, SEEK_SET);
+        avio_seek(pb, data_off + 18, SEEK_SET);
     }
 
     return 0;
@@ -517,7 +517,7 @@ static int sync(AVFormatContext *s, int64_t *timestamp, int *flags, int *stream_
 
     while(!url_feof(pb)){
         int len, num, i;
-        *pos= url_ftell(pb) - 3;
+        *pos= avio_tell(pb) - 3;
         if(rm->remaining_len > 0){
             num= rm->current_stream;
             len= rm->remaining_len;
@@ -529,7 +529,7 @@ static int sync(AVFormatContext *s, int64_t *timestamp, int *flags, int *stream_
             if(state == MKBETAG('I', 'N', 'D', 'X')){
                 int n_pkts, expected_len;
                 len = avio_rb32(pb);
-                url_fskip(pb, 2);
+                avio_skip(pb, 2);
                 n_pkts = avio_rb32(pb);
                 expected_len = 20 + n_pkts * 14;
                 if (len == 20)
@@ -566,7 +566,7 @@ static int sync(AVFormatContext *s, int64_t *timestamp, int *flags, int *stream_
         if (i == s->nb_streams) {
 skip:
             /* skip packet if unknown number */
-            url_fskip(pb, len);
+            avio_skip(pb, len);
             rm->remaining_len = 0;
             continue;
         }
@@ -624,7 +624,7 @@ static int rm_assemble_video_frame(AVFormatContext *s, AVIOContext *pb,
         vst->videobufpos = 8*vst->slices + 1;
         vst->cur_slice = 0;
         vst->curpic_num = pic_num;
-        vst->pktpos = url_ftell(pb);
+        vst->pktpos = avio_tell(pb);
     }
     if(type == 2)
         len = FFMIN(len, pos);
@@ -841,7 +841,7 @@ static int rm_read_packet(AVFormatContext *s, AVPacket *pkt)
                 len = !ast->audio_framesize ? RAW_PACKET_SIZE :
                     ast->coded_framesize * ast->sub_packet_h / 2;
                 flags = (seq++ == 1) ? 2 : 0;
-                pos = url_ftell(s->pb);
+                pos = avio_tell(s->pb);
             } else {
                 len=sync(s, &timestamp, &flags, &i, &pos);
                 if (len > 0)
@@ -904,7 +904,7 @@ static int64_t rm_read_dts(AVFormatContext *s, int stream_index,
     if(rm->old_format)
         return AV_NOPTS_VALUE;
 
-    url_fseek(s->pb, pos, SEEK_SET);
+    avio_seek(s->pb, pos, SEEK_SET);
     rm->remaining_len=0;
     for(;;){
         int seq=1;
@@ -929,7 +929,7 @@ static int64_t rm_read_dts(AVFormatContext *s, int stream_index,
                 break;
         }
 
-        url_fskip(s->pb, len);
+        avio_skip(s->pb, len);
     }
     *ppos = pos;
     return dts;

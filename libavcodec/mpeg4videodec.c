@@ -23,6 +23,7 @@
 #include "mpegvideo.h"
 #include "mpeg4video.h"
 #include "h263.h"
+#include "thread.h"
 
 // The defines below define the number of bits that are read at once for
 // reading vlc values. Changing these may improve speed and data cache needs
@@ -373,7 +374,13 @@ int mpeg4_decode_video_packet_header(MpegEncContext *s)
         return -1;
     }
     if(s->pict_type == FF_B_TYPE){
-        while(s->next_picture.mbskip_table[ s->mb_index2xy[ mb_num ] ]) mb_num++;
+        int mb_x = 0, mb_y = 0;
+
+        while(s->next_picture.mbskip_table[ s->mb_index2xy[ mb_num ] ]) {
+            if (!mb_x) ff_thread_await_progress((AVFrame*)s->next_picture_ptr, mb_y++, 0);
+            mb_num++;
+            if (++mb_x == s->mb_width) mb_x = 0;
+        }
         if(mb_num >= s->mb_num) return -1; // slice contains just skipped MBs which where already decoded
     }
 
@@ -1303,6 +1310,8 @@ static int mpeg4_decode_mb(MpegEncContext *s,
                 s->last_mv[i][1][0]=
                 s->last_mv[i][1][1]= 0;
             }
+
+            ff_thread_await_progress((AVFrame*)s->next_picture_ptr, s->mb_y, 0);
         }
 
         /* if we skipped it in the future P Frame than skip it now too */
@@ -1482,6 +1491,12 @@ end:
     if(s->codec_id==CODEC_ID_MPEG4){
         if(mpeg4_is_resync(s)){
             const int delta= s->mb_x + 1 == s->mb_width ? 2 : 1;
+
+            if(s->pict_type==FF_B_TYPE){
+                ff_thread_await_progress((AVFrame*)s->next_picture_ptr,
+                                        (s->mb_x + delta >= s->mb_width) ? FFMIN(s->mb_y+1, s->mb_height-1) : s->mb_y, 0);
+            }
+
             if(s->pict_type==FF_B_TYPE && s->next_picture.mbskip_table[xy + delta])
                 return SLICE_OK;
             return SLICE_END;
@@ -1494,17 +1509,21 @@ end:
 
 static int mpeg4_decode_gop_header(MpegEncContext * s, GetBitContext *gb){
     int hours, minutes, seconds;
-    unsigned time_code = show_bits(gb, 18);
 
-    if (time_code & 0x40) {     /* marker_bit */
-        hours   = time_code >> 13;
-        minutes = time_code >>  7 & 0x3f;
-        seconds = time_code       & 0x3f;
-        s->time_base = seconds + 60*(minutes + 60*hours);
-        skip_bits(gb, 20);      /* time_code, closed_gov, broken_link */
-    } else {
-        av_log(s->avctx, AV_LOG_WARNING, "GOP header missing marker_bit\n");
+    if(!show_bits(gb, 23)){
+        av_log(s->avctx, AV_LOG_WARNING, "GOP header invalid\n");
+        return -1;
     }
+
+    hours= get_bits(gb, 5);
+    minutes= get_bits(gb, 6);
+    skip_bits1(gb);
+    seconds= get_bits(gb, 6);
+
+    s->time_base= seconds + 60*(minutes + 60*hours);
+
+    skip_bits1(gb);
+    skip_bits1(gb);
 
     return 0;
 }
@@ -2235,11 +2254,12 @@ AVCodec ff_mpeg4_decoder = {
     NULL,
     ff_h263_decode_end,
     ff_h263_decode_frame,
-    CODEC_CAP_DRAW_HORIZ_BAND | CODEC_CAP_DR1 | CODEC_CAP_TRUNCATED | CODEC_CAP_DELAY,
+    CODEC_CAP_DRAW_HORIZ_BAND | CODEC_CAP_DR1 | CODEC_CAP_TRUNCATED | CODEC_CAP_DELAY | CODEC_CAP_FRAME_THREADS,
     .flush= ff_mpeg_flush,
     .max_lowres= 3,
     .long_name= NULL_IF_CONFIG_SMALL("MPEG-4 part 2"),
     .pix_fmts= ff_hwaccel_pixfmt_list_420,
+    .update_thread_context= ONLY_IF_THREADS_ENABLED(ff_mpeg_update_thread_context)
 };
 
 

@@ -353,6 +353,173 @@ drawbox
 drawbox=10:20:200:60:red@@0.5"
 @end example
 
+@section drawtext
+
+Draw text string or text from specified file on top of video using the
+libfreetype library.
+
+To enable compilation of this filter you need to configure FFmpeg with
+@code{--enable-libfreetype}.
+
+The filter also recognizes strftime() sequences in the provided text
+and expands them accordingly. Check the documentation of strftime().
+
+The filter accepts parameters as a list of @var{key}=@var{value} pairs,
+separated by ":".
+
+The description of the accepted parameters follows.
+
+@table @option
+
+@item fontfile
+The font file to be used for drawing text. Path must be included.
+This parameter is mandatory.
+
+@item text
+The text string to be drawn. The text must be a sequence of UTF-8
+encoded characters.
+This parameter is mandatory if no file is specified with the parameter
+@var{textfile}.
+
+@item textfile
+A text file containing text to be drawn. The text must be a sequence
+of UTF-8 encoded characters.
+
+This parameter is mandatory if no text string is specified with the
+parameter @var{text}.
+
+If both text and textfile are specified, an error is thrown.
+
+@item x, y
+The offsets where text will be drawn within the video frame.
+Relative to the top/left border of the output image.
+
+The default value of @var{x} and @var{y} is 0.
+
+@item fontsize
+The font size to be used for drawing text.
+The default value of @var{fontsize} is 16.
+
+@item fontcolor
+The color to be used for drawing fonts.
+Either a string (e.g. "red") or in 0xRRGGBB[AA] format
+(e.g. "0xff000033"), possibly followed by an alpha specifier.
+The default value of @var{fontcolor} is "black".
+
+@item boxcolor
+The color to be used for drawing box around text.
+Either a string (e.g. "yellow") or in 0xRRGGBB[AA] format
+(e.g. "0xff00ff"), possibly followed by an alpha specifier.
+The default value of @var{boxcolor} is "white".
+
+@item box
+Used to draw a box around text using background color.
+Value should be either 1 (enable) or 0 (disable).
+The default value of @var{box} is 0.
+
+@item shadowx, shadowy
+The x and y offsets for the text shadow position with respect to the
+position of the text. They can be either positive or negative
+values. Default value for both is "0".
+
+@item shadowcolor
+The color to be used for drawing a shadow behind the drawn text.  It
+can be a color name (e.g. "yellow") or a string in the 0xRRGGBB[AA]
+form (e.g. "0xff00ff"), possibly followed by an alpha specifier.
+The default value of @var{shadowcolor} is "black".
+
+@item ft_load_flags
+Flags to be used for loading the fonts.
+
+The flags map the corresponding flags supported by libfreetype, and are
+a combination of the following values:
+@table @var
+@item default
+@item no_scale
+@item no_hinting
+@item render
+@item no_bitmap
+@item vertical_layout
+@item force_autohint
+@item crop_bitmap
+@item pedantic
+@item ignore_global_advance_width
+@item no_recurse
+@item ignore_transform
+@item monochrome
+@item linear_design
+@item no_autohint
+@item end table
+@end table
+
+Default value is "render".
+
+For more information consult the documentation for the FT_LOAD_*
+libfreetype flags.
+
+@item tabsize
+The size in number of spaces to use for rendering the tab.
+Default value is 4.
+@end table
+
+For example the command:
+@example
+drawtext="fontfile=/usr/share/fonts/truetype/freefont/FreeSerif.ttf: text='Test Text'"
+@end example
+
+will draw "Test Text" with font FreeSerif, using the default values
+for the optional parameters.
+
+The command:
+@example
+drawtext="fontfile=/usr/share/fonts/truetype/freefont/FreeSerif.ttf: text='Test Text':\
+          x=100: y=50: fontsize=24: fontcolor=yellow@@0.2: box=1: boxcolor=red@@0.2"
+@end example
+
+will draw 'Test Text' with font FreeSerif of size 24 at position x=100
+and y=50 (counting from the top-left corner of the screen), text is
+yellow with a red box around it. Both the text and the box have an
+opacity of 20%.
+
+Note that the double quotes are not necessary if spaces are not used
+within the parameter list.
+
+For more information about libfreetype, check:
+@url{http://www.freetype.org/}.
+
+@section fade
+
+Apply fade-in/out effect to input video.
+
+It accepts the parameters:
+@var{type}:@var{start_frame}:@var{nb_frames}
+
+@var{type} specifies if the effect type, can be either "in" for
+fade-in, or "out" for a fade-out effect.
+
+@var{start_frame} specifies the number of the start frame for starting
+to apply the fade effect.
+
+@var{nb_frames} specifies the number of frames for which the fade
+effect has to last. At the end of the fade-in effect the output video
+will have the same intensity as the input video, at the end of the
+fade-out transition the output video will be completely black.
+
+A few usage examples follow, usable too as test scenarios.
+@example
+# fade in first 30 frames of video
+fade=in:0:30
+
+# fade out last 45 frames of a 200-frame video
+fade=out:155:45
+
+# fade in first 25 frames and fade out last 25 frames of a 1000-frame video
+fade=in:0:25, fade=out:975:25
+
+# make first 5 frames black, then fade in from frame 5-24
+fade=in:5:20
+@end example
+
 @section fifo
 
 Buffer input images and send them when they are requested.
@@ -438,6 +605,10 @@ regions by truncation to 8bit colordepth.
 Interpolate the gradients that should go where the bands are, and
 dither them.
 
+This filter is designed for playback only.  Do not use it prior to
+lossy compression, because compression tends to lose the dither and
+bring back the bands.
+
 The filter takes two optional parameters, separated by ':':
 @var{strength}:@var{radius}
 
@@ -496,6 +667,104 @@ a float number which specifies luma temporal strength, defaults to
 a float number which specifies chroma temporal strength, defaults to
 @var{luma_tmp}*@var{chroma_spatial}/@var{luma_spatial}
 @end table
+
+@section mp
+
+Apply an MPlayer filter to the input video.
+
+This filter provides a wrapper around most of the filters of
+MPlayer/MEncoder.
+
+This wrapper is considered experimental. Some of the wrapped filters
+may not work properly and we may drop support for them, as they will
+be implemented natively into FFmpeg. Thus you should avoid
+depending on them when writing portable scripts.
+
+The filters accepts the parameters:
+@var{filter_name}[:=]@var{filter_params}
+
+@var{filter_name} is the name of a supported MPlayer filter,
+@var{filter_params} is a string containing the parameters accepted by
+the named filter.
+
+The list of the currently supported filters follows:
+@table @var
+@item 2xsai
+@item blackframe
+@item boxblur
+@item cropdetect
+@item decimate
+@item delogo
+@item denoise3d
+@item detc
+@item dint
+@item divtc
+@item down3dright
+@item dsize
+@item eq2
+@item eq
+@item field
+@item fil
+@item fixpts
+@item framestep
+@item fspp
+@item geq
+@item gradfun
+@item harddup
+@item hqdn3d
+@item hue
+@item il
+@item ilpack
+@item ivtc
+@item kerndeint
+@item mcdeint
+@item mirror
+@item noise
+@item ow
+@item palette
+@item perspective
+@item phase
+@item pp7
+@item pullup
+@item qp
+@item rectangle
+@item remove_logo
+@item rgbtest
+@item rotate
+@item sab
+@item screenshot
+@item smartblur
+@item softpulldown
+@item softskip
+@item spp
+@item swapuv
+@item telecine
+@item test
+@item tile
+@item tinterlace
+@item unsharp
+@item uspp
+@item yuvcsp
+@item yvu9
+@end table
+
+The parameter syntax and behavior for the listed filters are the same
+of the corresponding MPlayer filters. For detailed instructions check
+the "VIDEO FILTERS" section in the MPlayer manual.
+
+Some examples follow:
+@example
+# remove a logo by interpolating the surrounding pixels
+mp=delogo=200:200:80:20:1
+
+# adjust gamma, brightness, contrast
+mp=eq2=1.0:2:0.5
+
+# tweak hue and saturation
+mp=hue=100:-10
+@end example
+
+See also mplayer(1), @url{http://www.mplayerhq.hu/}.
 
 @section noformat
 
@@ -735,13 +1004,33 @@ can be used to test the monowhite pixel format descriptor definition.
 
 Scale the input video to @var{width}:@var{height} and/or convert the image format.
 
-For example the command:
+The parameters @var{width} and @var{height} are expressions containing
+the following constants:
 
-@example
-./ffmpeg -i in.avi -vf "scale=200:100" out.avi
-@end example
+@table @option
+@item E, PI, PHI
+the corresponding mathematical approximated values for e
+(euler number), pi (greek PI), phi (golden ratio)
 
-will scale the input video to a size of 200x100.
+@item in_w, in_h
+the input width and heigth
+
+@item iw, ih
+same as @var{in_w} and @var{in_h}
+
+@item out_w, out_h
+the output (cropped) width and heigth
+
+@item ow, oh
+same as @var{out_w} and @var{out_h}
+
+@item a
+input display aspect ratio, same as @var{iw} / @var{ih}
+
+@item hsub, vsub
+horizontal and vertical chroma subsample values. For example for the
+pixel format "yuv422p" @var{hsub} is 2 and @var{vsub} is 1.
+@end table
 
 If the input image format is different from the format requested by
 the next filter, the scale filter will convert the input to the
@@ -755,6 +1044,66 @@ use, for the respective output size, a value that maintains the aspect
 ratio of the input image.
 
 The default value of @var{width} and @var{height} is 0.
+
+Some examples follow:
+@example
+# scale the input video to a size of 200x100.
+scale=200:100
+
+# scale the input to 2x
+scale=2*iw:2*ih
+# the above is the same as
+scale=2*in_w:2*in_h
+
+# scale the input to half size
+scale=iw/2:ih/2
+
+# increase the width, and set the height to the same size
+scale=3/2*iw:ow
+
+# seek for Greek harmony
+scale=iw:1/PHI*iw
+scale=ih*PHI:ih
+
+# increase the height, and set the width to 3/2 of the height
+scale=3/2*oh:3/5*ih
+
+# increase the size, but make the size a multiple of the chroma
+scale="trunc(3/2*iw/hsub)*hsub:trunc(3/2*ih/vsub)*vsub"
+
+# increase the width to a maximum of 500 pixels, keep the same input aspect ratio
+scale='min(500\, iw*3/2):-1'
+@end example
+
+@anchor{setdar}
+@section setdar
+
+Set the Display Aspect Ratio for the filter output video.
+
+This is done by changing the specified Sample (aka Pixel) Aspect
+Ratio, according to the following equation:
+@math{DAR = HORIZONTAL_RESOLUTION / VERTICAL_RESOLUTION * SAR}
+
+Keep in mind that this filter does not modify the pixel dimensions of
+the video frame. Also the display aspect ratio set by this filter may
+be changed by later filters in the filterchain, e.g. in case of
+scaling or if another "setdar" or a "setsar" filter is applied.
+
+The filter accepts a parameter string which represents the wanted
+display aspect ratio.
+The parameter can be a floating point number string, or an expression
+of the form @var{num}:@var{den}, where @var{num} and @var{den} are the
+numerator and denominator of the aspect ratio.
+If the parameter is not specified, it is assumed the value "0:1".
+
+For example to change the display aspect ratio to 16:9, specify:
+@example
+setdar=16:9
+# the above is equivalent to
+setdar=1.77777
+@end example
+
+See also the "setsar" filter documentation (@pxref{setsar}).
 
 @section setpts
 
@@ -814,6 +1163,32 @@ setpts=N/(25*TB)
 
 # fixed rate 25 fps with some jitter
 setpts='1/(25*TB) * (N + 0.05 * sin(N*2*PI/25))'
+@end example
+
+@anchor{setsar}
+@section setsar
+
+Set the Sample (aka Pixel) Aspect Ratio for the filter output video.
+
+Note that as a consequence of the application of this filter, the
+output display aspect ratio will change according to the following
+equation:
+@math{DAR = HORIZONTAL_RESOLUTION / VERTICAL_RESOLUTION * SAR}
+
+Keep in mind that the sample aspect ratio set by this filter may be
+changed by later filters in the filterchain, e.g. if another "setsar"
+or a "setdar" filter is applied.
+
+The filter accepts a parameter string which represents the wanted
+sample aspect ratio.
+The parameter can be a floating point number string, or an expression
+of the form @var{num}:@var{den}, where @var{num} and @var{den} are the
+numerator and denominator of the aspect ratio.
+If the parameter is not specified, it is assumed the value "0:1".
+
+For example to change the sample aspect ratio to 10:11, specify:
+@example
+setsar=10:11
 @end example
 
 @section settb
@@ -1014,7 +1389,7 @@ This source is mainly intended for a programmatic use, in particular
 through the interface defined in @file{libavfilter/vsrc_buffer.h}.
 
 It accepts the following parameters:
-@var{width}:@var{height}:@var{pix_fmt_string}:@var{timebase_num}:@var{timebase_den}
+@var{width}:@var{height}:@var{pix_fmt_string}:@var{timebase_num}:@var{timebase_den}:@var{sample_aspect_ratio_num}:@var{sample_aspect_ratio.den}
 
 All the parameters need to be explicitely defined.
 
@@ -1033,15 +1408,20 @@ name.
 @item timebase_num, timebase_den
 Specify numerator and denomitor of the timebase assumed by the
 timestamps of the buffered frames.
+
+@item sample_aspect_ratio.num, sample_aspect_ratio.den
+Specify numerator and denominator of the sample aspect ratio assumed
+by the video frames.
 @end table
 
 For example:
 @example
-buffer=320:240:yuv410p:1:24
+buffer=320:240:yuv410p:1:24:1:1
 @end example
 
 will instruct the source to accept video frames with size 320x240 and
-with format "yuv410p" and assuming 1/24 as the timestamps timebase.
+with format "yuv410p", assuming 1/24 as the timestamps timebase and
+square pixels (1:1 sample aspect ratio).
 Since the pixel format with name "yuv410p" corresponds to the number 6
 (check the enum PixelFormat definition in @file{libavutil/pixfmt.h}),
 this example corresponds to:

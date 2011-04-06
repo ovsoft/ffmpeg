@@ -40,7 +40,7 @@
 #define MAX_QUANT_TABLES 8
 #define MAX_CONTEXT_INPUTS 5
 
-extern const uint8_t ff_log2_run[32];
+extern const uint8_t ff_log2_run[41];
 
 static const int8_t quant3[256]={
  0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
@@ -792,7 +792,7 @@ static av_cold int init_slice_contexts(FFV1Context *f){
         fs->slice_x     = sxs;
         fs->slice_y     = sys;
 
-        fs->sample_buffer = av_malloc(6 * (fs->width+6) * sizeof(*fs->sample_buffer));
+        fs->sample_buffer = av_malloc(9 * (fs->width+6) * sizeof(*fs->sample_buffer));
         if (!fs->sample_buffer)
             return AVERROR(ENOMEM);
     }

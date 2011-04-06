@@ -23,6 +23,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 #include "avformat.h"
+#include "avio_internal.h"
 #include "pcm.h"
 #include "riff.h"
 
@@ -42,22 +43,21 @@ static int wav_write_header(AVFormatContext *s)
     AVIOContext *pb = s->pb;
     int64_t fmt, fact;
 
-    put_tag(pb, "RIFF");
+    ffio_wfourcc(pb, "RIFF");
     avio_wl32(pb, 0); /* file length */
-    put_tag(pb, "WAVE");
+    ffio_wfourcc(pb, "WAVE");
 
     /* format header */
     fmt = ff_start_tag(pb, "fmt ");
     if (ff_put_wav_header(pb, s->streams[0]->codec) < 0) {
         av_log(s, AV_LOG_ERROR, "%s codec not supported in WAVE format\n",
                s->streams[0]->codec->codec ? s->streams[0]->codec->codec->name : "NONE");
-        av_free(wav);
         return -1;
     }
     ff_end_tag(pb, fmt);
 
     if (s->streams[0]->codec->codec_tag != 0x01 /* hence for all other than PCM */
-        && !url_is_streamed(s->pb)) {
+        && s->pb->seekable) {
         fact = ff_start_tag(pb, "fact");
         avio_wl32(pb, 0);
         ff_end_tag(pb, fact);
@@ -70,7 +70,7 @@ static int wav_write_header(AVFormatContext *s)
     /* data header */
     wav->data = ff_start_tag(pb, "data");
 
-    put_flush_packet(pb);
+    avio_flush(pb);
 
     return 0;
 }
@@ -95,18 +95,18 @@ static int wav_write_trailer(AVFormatContext *s)
     WAVContext    *wav = s->priv_data;
     int64_t file_size;
 
-    put_flush_packet(pb);
+    avio_flush(pb);
 
-    if (!url_is_streamed(s->pb)) {
+    if (s->pb->seekable) {
         ff_end_tag(pb, wav->data);
 
         /* update file size */
-        file_size = url_ftell(pb);
-        url_fseek(pb, 4, SEEK_SET);
+        file_size = avio_tell(pb);
+        avio_seek(pb, 4, SEEK_SET);
         avio_wl32(pb, (uint32_t)(file_size - 8));
-        url_fseek(pb, file_size, SEEK_SET);
+        avio_seek(pb, file_size, SEEK_SET);
 
-        put_flush_packet(pb);
+        avio_flush(pb);
 
         if(s->streams[0]->codec->codec_tag != 0x01) {
             /* Update num_samps in fact chunk */
@@ -114,10 +114,10 @@ static int wav_write_trailer(AVFormatContext *s)
             number_of_samples = av_rescale(wav->maxpts - wav->minpts + wav->last_duration,
                                            s->streams[0]->codec->sample_rate * (int64_t)s->streams[0]->time_base.num,
                                            s->streams[0]->time_base.den);
-            url_fseek(pb, wav->data-12, SEEK_SET);
+            avio_seek(pb, wav->data-12, SEEK_SET);
             avio_wl32(pb, number_of_samples);
-            url_fseek(pb, file_size, SEEK_SET);
-            put_flush_packet(pb);
+            avio_seek(pb, file_size, SEEK_SET);
+            avio_flush(pb);
         }
     }
     return 0;
@@ -159,7 +159,7 @@ static int64_t find_tag(AVIOContext *pb, uint32_t tag1)
         size = next_tag(pb, &tag);
         if (tag == tag1)
             break;
-        url_fseek(pb, size, SEEK_CUR);
+        avio_skip(pb, size);
     }
     return size;
 }
@@ -216,7 +216,7 @@ static int wav_read_header(AVFormatContext *s,
         avio_rl64(pb); /* RIFF size */
         data_size = avio_rl64(pb);
         sample_count = avio_rl64(pb);
-        url_fskip(pb, size - 16); /* skip rest of ds64 chunk */
+        avio_skip(pb, size - 16); /* skip rest of ds64 chunk */
     }
 
     /* parse fmt header */
@@ -242,7 +242,7 @@ static int wav_read_header(AVFormatContext *s,
             sample_count = avio_rl32(pb);
             size -= 4;
         }
-        url_fseek(pb, size, SEEK_CUR);
+        avio_skip(pb, size);
     }
     if (rf64)
         size = data_size;
@@ -251,7 +251,7 @@ static int wav_read_header(AVFormatContext *s,
     if (!size) {
         wav->data_end = INT64_MAX;
     } else
-        wav->data_end= url_ftell(pb) + size;
+        wav->data_end= avio_tell(pb) + size;
 
     if (!sample_count && st->codec->channels && av_get_bits_per_sample(st->codec->codec_id))
         sample_count = (size<<3) / (st->codec->channels * (uint64_t)av_get_bits_per_sample(st->codec->codec_id));
@@ -275,7 +275,7 @@ static int64_t find_guid(AVIOContext *pb, const uint8_t guid1[16])
             return -1;
         if (!memcmp(guid, guid1, 16))
             return size;
-        url_fskip(pb, FFALIGN(size, INT64_C(8)) - 24);
+        avio_skip(pb, FFALIGN(size, INT64_C(8)) - 24);
     }
     return -1;
 }
@@ -295,7 +295,7 @@ static int wav_read_packet(AVFormatContext *s,
 
     st = s->streams[0];
 
-    left = wav->data_end - url_ftell(s->pb);
+    left = wav->data_end - avio_tell(s->pb);
     if (left <= 0){
         if (CONFIG_W64_DEMUXER && wav->w64)
             left = find_guid(s->pb, guid_data) - 24;
@@ -303,7 +303,7 @@ static int wav_read_packet(AVFormatContext *s,
             left = find_tag(s->pb, MKTAG('d', 'a', 't', 'a'));
         if (left < 0)
             return AVERROR_EOF;
-        wav->data_end= url_ftell(s->pb) + left;
+        wav->data_end= avio_tell(s->pb) + left;
     }
 
     size = MAX_SIZE;
@@ -409,7 +409,7 @@ static int w64_read_header(AVFormatContext *s, AVFormatParameters *ap)
 
     /* subtract chunk header size - normal wav file doesn't count it */
     ff_get_wav_header(pb, st->codec, size - 24);
-    url_fskip(pb, FFALIGN(size, INT64_C(8)) - size);
+    avio_skip(pb, FFALIGN(size, INT64_C(8)) - size);
 
     st->need_parsing = AVSTREAM_PARSE_FULL;
 
@@ -420,7 +420,7 @@ static int w64_read_header(AVFormatContext *s, AVFormatParameters *ap)
         av_log(s, AV_LOG_ERROR, "could not find data guid\n");
         return -1;
     }
-    wav->data_end = url_ftell(pb) + size - 24;
+    wav->data_end = avio_tell(pb) + size - 24;
     wav->w64      = 1;
 
     return 0;

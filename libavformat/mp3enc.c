@@ -23,6 +23,7 @@
 #include "avformat.h"
 #include "id3v1.h"
 #include "id3v2.h"
+#include "rawenc.h"
 #include "libavutil/intreadwrite.h"
 #include "libavutil/opt.h"
 
@@ -95,7 +96,7 @@ static int id3v2_put_ttag(AVFormatContext *s, const char *str1, const char *str2
     uint8_t *pb;
     int (*put)(AVIOContext*, const char*);
     AVIOContext *dyn_buf;
-    if (url_open_dyn_buf(&dyn_buf) < 0)
+    if (avio_open_dyn_buf(&dyn_buf) < 0)
         return AVERROR(ENOMEM);
 
     /* check if the strings are ASCII-only and use UTF16 only if
@@ -114,7 +115,7 @@ static int id3v2_put_ttag(AVFormatContext *s, const char *str1, const char *str2
     put(dyn_buf, str1);
     if (str2)
         put(dyn_buf, str2);
-    len = url_close_dyn_buf(dyn_buf, &pb);
+    len = avio_close_dyn_buf(dyn_buf, &pb);
 
     avio_wb32(s->pb, tag);
     id3v2_put_size(s, len);
@@ -125,14 +126,6 @@ static int id3v2_put_ttag(AVFormatContext *s, const char *str1, const char *str2
     return len + ID3v2_HEADER_SIZE;
 }
 
-
-static int mp3_write_packet(struct AVFormatContext *s, AVPacket *pkt)
-{
-    avio_write(s->pb, pkt->data, pkt->size);
-    put_flush_packet(s->pb);
-    return 0;
-}
-
 static int mp3_write_trailer(struct AVFormatContext *s)
 {
     uint8_t buf[ID3v1_TAG_SIZE];
@@ -140,7 +133,7 @@ static int mp3_write_trailer(struct AVFormatContext *s)
     /* write the id3v1 tag */
     if (id3v1_create_tag(s, buf) > 0) {
         avio_write(s->pb, buf, ID3v1_TAG_SIZE);
-        put_flush_packet(s->pb);
+        avio_flush(s->pb);
     }
     return 0;
 }
@@ -155,7 +148,7 @@ AVOutputFormat ff_mp2_muxer = {
     CODEC_ID_MP2,
     CODEC_ID_NONE,
     NULL,
-    mp3_write_packet,
+    ff_raw_write_packet,
     mp3_write_trailer,
 };
 #endif
@@ -211,7 +204,7 @@ static int mp3_write_header(struct AVFormatContext *s)
     avio_w8(s->pb, 0); /* flags */
 
     /* reserve space for size */
-    size_pos = url_ftell(s->pb);
+    size_pos = avio_tell(s->pb);
     avio_wb32(s->pb, 0);
 
     ff_metadata_conv(&s->metadata, ff_id3v2_34_metadata_conv, NULL);
@@ -237,10 +230,10 @@ static int mp3_write_header(struct AVFormatContext *s)
         totlen += ret;
     }
 
-    cur_pos = url_ftell(s->pb);
-    url_fseek(s->pb, size_pos, SEEK_SET);
+    cur_pos = avio_tell(s->pb);
+    avio_seek(s->pb, size_pos, SEEK_SET);
     id3v2_put_size(s, totlen);
-    url_fseek(s->pb, cur_pos, SEEK_SET);
+    avio_seek(s->pb, cur_pos, SEEK_SET);
 
     return 0;
 }
@@ -254,7 +247,7 @@ AVOutputFormat ff_mp3_muxer = {
     CODEC_ID_MP3,
     CODEC_ID_NONE,
     mp3_write_header,
-    mp3_write_packet,
+    ff_raw_write_packet,
     mp3_write_trailer,
     AVFMT_NOTIMESTAMPS,
     .priv_class = &mp3_muxer_class,

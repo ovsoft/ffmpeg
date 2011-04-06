@@ -199,7 +199,7 @@ static int flv_write_header(AVFormatContext *s)
         }
         av_set_pts_info(s->streams[i], 32, 1, 1000); /* 32 bit pts in ms */
     }
-    put_tag(pb,"FLV");
+    avio_write(pb, "FLV", 3);
     avio_w8(pb,1);
     avio_w8(pb,   FLV_HEADER_FLAG_HASAUDIO * !!audio_enc
                  + FLV_HEADER_FLAG_HASVIDEO * !!video_enc);
@@ -221,7 +221,7 @@ static int flv_write_header(AVFormatContext *s)
 
     /* write meta_tag */
     avio_w8(pb, 18);         // tag type META
-    metadata_size_pos= url_ftell(pb);
+    metadata_size_pos= avio_tell(pb);
     avio_wb24(pb, 0);          // size of data part (sum of all parts below)
     avio_wb24(pb, 0);          // time stamp
     avio_wb32(pb, 0);          // reserved
@@ -237,7 +237,7 @@ static int flv_write_header(AVFormatContext *s)
     avio_wb32(pb, 5*!!video_enc + 5*!!audio_enc + 2); // +2 for duration and file size
 
     put_amf_string(pb, "duration");
-    flv->duration_offset= url_ftell(pb);
+    flv->duration_offset= avio_tell(pb);
     put_amf_double(pb, s->duration / AV_TIME_BASE); // fill in the guessed duration, it'll be corrected later if incorrect
 
     if(video_enc){
@@ -281,17 +281,17 @@ static int flv_write_header(AVFormatContext *s)
     }
 
     put_amf_string(pb, "filesize");
-    flv->filesize_offset= url_ftell(pb);
+    flv->filesize_offset= avio_tell(pb);
     put_amf_double(pb, 0); // delayed write
 
     put_amf_string(pb, "");
     avio_w8(pb, AMF_END_OF_OBJECT);
 
     /* write total size of tag */
-    data_size= url_ftell(pb) - metadata_size_pos - 10;
-    url_fseek(pb, metadata_size_pos, SEEK_SET);
+    data_size= avio_tell(pb) - metadata_size_pos - 10;
+    avio_seek(pb, metadata_size_pos, SEEK_SET);
     avio_wb24(pb, data_size);
-    url_fseek(pb, data_size + 10 - 3, SEEK_CUR);
+    avio_skip(pb, data_size + 10 - 3);
     avio_wb32(pb, data_size + 11);
 
     for (i = 0; i < s->nb_streams; i++) {
@@ -304,7 +304,7 @@ static int flv_write_header(AVFormatContext *s)
             avio_wb24(pb, 0); // ts
             avio_w8(pb, 0); // ts ext
             avio_wb24(pb, 0); // streamid
-            pos = url_ftell(pb);
+            pos = avio_tell(pb);
             if (enc->codec_id == CODEC_ID_AAC) {
                 avio_w8(pb, get_audio_flags(enc));
                 avio_w8(pb, 0); // AAC sequence header
@@ -315,10 +315,10 @@ static int flv_write_header(AVFormatContext *s)
                 avio_wb24(pb, 0); // composition time
                 ff_isom_write_avcc(pb, enc->extradata, enc->extradata_size);
             }
-            data_size = url_ftell(pb) - pos;
-            url_fseek(pb, -data_size - 10, SEEK_CUR);
+            data_size = avio_tell(pb) - pos;
+            avio_seek(pb, -data_size - 10, SEEK_CUR);
             avio_wb24(pb, data_size);
-            url_fseek(pb, data_size + 10 - 3, SEEK_CUR);
+            avio_skip(pb, data_size + 10 - 3);
             avio_wb32(pb, data_size + 11); // previous tag size
         }
     }
@@ -343,15 +343,15 @@ static int flv_write_trailer(AVFormatContext *s)
         }
     }
 
-    file_size = url_ftell(pb);
+    file_size = avio_tell(pb);
 
     /* update informations */
-    url_fseek(pb, flv->duration_offset, SEEK_SET);
+    avio_seek(pb, flv->duration_offset, SEEK_SET);
     put_amf_double(pb, flv->duration / (double)1000);
-    url_fseek(pb, flv->filesize_offset, SEEK_SET);
+    avio_seek(pb, flv->filesize_offset, SEEK_SET);
     put_amf_double(pb, file_size);
 
-    url_fseek(pb, file_size, SEEK_SET);
+    avio_seek(pb, file_size, SEEK_SET);
     return 0;
 }
 
@@ -430,7 +430,7 @@ static int flv_write_packet(AVFormatContext *s, AVPacket *pkt)
     avio_wb32(pb,size+flags_size+11); // previous tag size
     flv->duration = FFMAX(flv->duration, pkt->pts + flv->delay + pkt->duration);
 
-    put_flush_packet(pb);
+    avio_flush(pb);
 
     av_free(data);
 

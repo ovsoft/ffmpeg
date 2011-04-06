@@ -48,7 +48,7 @@ static const AVCodecTag nut_tags[] = {
 static int av_write(void * h, size_t len, const uint8_t * buf) {
     AVIOContext * bc = h;
     avio_write(bc, buf, len);
-    //put_flush_packet(bc);
+    //avio_flush(bc);
     return len;
 }
 
@@ -142,7 +142,7 @@ static int nut_write_trailer(AVFormatContext * avf) {
     int i;
 
     nut_muxer_uninit_reorder(priv->nut);
-    put_flush_packet(bc);
+    avio_flush(bc);
 
     for(i = 0; priv->s[i].type != -1; i++ ) av_freep(&priv->s[i].fourcc);
     av_freep(&priv->s);
@@ -179,10 +179,10 @@ static size_t av_read(void * h, size_t len, uint8_t * buf) {
 static off_t av_seek(void * h, long long pos, int whence) {
     AVIOContext * bc = h;
     if (whence == SEEK_END) {
-        pos = url_fsize(bc) + pos;
+        pos = avio_size(bc) + pos;
         whence = SEEK_SET;
     }
-    return url_fseek(bc, pos, whence);
+    return avio_seek(bc, pos, whence);
 }
 
 static int nut_read_header(AVFormatContext * avf, AVFormatParameters * ap) {
@@ -272,7 +272,7 @@ static int nut_read_packet(AVFormatContext * avf, AVPacket * pkt) {
     if (pd.flags & NUT_FLAG_KEY) pkt->flags |= AV_PKT_FLAG_KEY;
     pkt->pts = pd.pts;
     pkt->stream_index = pd.stream;
-    pkt->pos = url_ftell(avf->pb);
+    pkt->pos = avio_tell(avf->pb);
 
     ret = nut_read_frame(priv->nut, &pd.len, pkt->data);
 

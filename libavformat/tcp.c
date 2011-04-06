@@ -71,10 +71,13 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
  redo:
     ret = connect(fd, cur_ai->ai_addr, cur_ai->ai_addrlen);
     if (ret < 0) {
+        int timeout=50;
         struct pollfd p = {fd, POLLOUT, 0};
         if (ff_neterrno() == AVERROR(EINTR)) {
-            if (url_interrupt_cb())
+            if (url_interrupt_cb()) {
+                ret = AVERROR_EXIT;
                 goto fail1;
+            }
             goto redo;
         }
         if (ff_neterrno() != AVERROR(EINPROGRESS) &&
@@ -84,12 +87,18 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
         /* wait until we are connected or until abort */
         for(;;) {
             if (url_interrupt_cb()) {
-                ret = AVERROR(EINTR);
+                ret = AVERROR_EXIT;
                 goto fail1;
             }
             ret = poll(&p, 1, 100);
             if (ret > 0)
                 break;
+            if(!--timeout){
+                av_log(NULL, AV_LOG_ERROR,
+                    "TCP open %s:%d timeout\n",
+                    hostname, port);
+                goto fail;
+            }
         }
 
         /* test error */

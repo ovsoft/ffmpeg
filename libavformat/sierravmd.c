@@ -95,11 +95,11 @@ static int vmd_read_header(AVFormatContext *s,
     int sound_buffers;
 
     /* fetch the main header, including the 2 header length bytes */
-    url_fseek(pb, 0, SEEK_SET);
+    avio_seek(pb, 0, SEEK_SET);
     if (avio_read(pb, vmd->vmd_header, VMD_HEADER_SIZE) != VMD_HEADER_SIZE)
         return AVERROR(EIO);
 
-    if(vmd->vmd_header[16] == 'i' && vmd->vmd_header[17] == 'v' && vmd->vmd_header[18] == '3')
+    if(vmd->vmd_header[24] == 'i' && vmd->vmd_header[25] == 'v' && vmd->vmd_header[26] == '3')
         vmd->is_indeo3 = 1;
     else
         vmd->is_indeo3 = 0;
@@ -155,7 +155,7 @@ static int vmd_read_header(AVFormatContext *s,
     toc_offset = AV_RL32(&vmd->vmd_header[812]);
     vmd->frame_count = AV_RL16(&vmd->vmd_header[6]);
     vmd->frames_per_block = AV_RL16(&vmd->vmd_header[18]);
-    url_fseek(pb, toc_offset, SEEK_SET);
+    avio_seek(pb, toc_offset, SEEK_SET);
 
     raw_frame_table = NULL;
     vmd->frame_table = NULL;
@@ -243,13 +243,13 @@ static int vmd_read_packet(AVFormatContext *s,
 
     frame = &vmd->frame_table[vmd->current_frame];
     /* position the stream (will probably be there already) */
-    url_fseek(pb, frame->frame_offset, SEEK_SET);
+    avio_seek(pb, frame->frame_offset, SEEK_SET);
 
     if (av_new_packet(pkt, frame->frame_size + BYTES_PER_FRAME_RECORD))
         return AVERROR(ENOMEM);
-    pkt->pos= url_ftell(pb);
+    pkt->pos= avio_tell(pb);
     memcpy(pkt->data, frame->frame_record, BYTES_PER_FRAME_RECORD);
-    if(vmd->is_indeo3)
+    if(vmd->is_indeo3 && frame->frame_record[0] == 0x02)
         ret = avio_read(pb, pkt->data, frame->frame_size);
     else
         ret = avio_read(pb, pkt->data + BYTES_PER_FRAME_RECORD,

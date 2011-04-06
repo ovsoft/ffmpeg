@@ -19,6 +19,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 #include "avformat.h"
+#include "avio_internal.h"
 #include "rm.h"
 
 typedef struct {
@@ -74,13 +75,13 @@ static int rv10_write_header(AVFormatContext *ctx,
 
     start_ptr = s->buf_ptr;
 
-    put_tag(s, ".RMF");
+    ffio_wfourcc(s, ".RMF");
     avio_wb32(s,18); /* header size */
     avio_wb16(s,0);
     avio_wb32(s,0);
     avio_wb32(s,4 + ctx->nb_streams); /* num headers */
 
-    put_tag(s,"PROP");
+    ffio_wfourcc(s,"PROP");
     avio_wb32(s, 50);
     avio_wb16(s, 0);
     packet_max_size = 0;
@@ -117,13 +118,13 @@ static int rv10_write_header(AVFormatContext *ctx,
     avio_wb32(s, 0);           /* data offset : will be patched after */
     avio_wb16(s, ctx->nb_streams);    /* num streams */
     flags = 1 | 2; /* save allowed & perfect play */
-    if (url_is_streamed(s))
+    if (!s->seekable)
         flags |= 4; /* live broadcast */
     avio_wb16(s, flags);
 
     /* comments */
 
-    put_tag(s,"CONT");
+    ffio_wfourcc(s,"CONT");
     size =  4 * 2 + 10;
     for(i=0; i<FF_ARRAY_ELEMS(ff_rm_metadata); i++) {
         tag = av_metadata_get(ctx->metadata, ff_rm_metadata[i], NULL, 0);
@@ -151,7 +152,7 @@ static int rv10_write_header(AVFormatContext *ctx,
             codec_data_size = 34;
         }
 
-        put_tag(s,"MDPR");
+        ffio_wfourcc(s,"MDPR");
         size = 10 + 9 * 4 + strlen(desc) + strlen(mimetype) + codec_data_size;
         avio_wb32(s, size);
         avio_wb16(s, 0);
@@ -169,7 +170,7 @@ static int rv10_write_header(AVFormatContext *ctx,
         avio_wb32(s, 0);           /* start time */
         avio_wb32(s, BUFFER_DURATION);           /* preroll */
         /* duration */
-        if (url_is_streamed(s) || !stream->total_frames)
+        if (!s->seekable || !stream->total_frames)
             avio_wb32(s, (int)(3600 * 1000));
         else
             avio_wb32(s, (int)(stream->total_frames * 1000 / stream->frame_rate));
@@ -183,10 +184,10 @@ static int rv10_write_header(AVFormatContext *ctx,
             coded_frame_size = (stream->enc->bit_rate *
                                 stream->enc->frame_size) / (8 * sample_rate);
             /* audio codec info */
-            put_tag(s, ".ra");
+            avio_write(s, ".ra", 3);
             avio_w8(s, 0xfd);
             avio_wb32(s, 0x00040000); /* version */
-            put_tag(s, ".ra4");
+            ffio_wfourcc(s, ".ra4");
             avio_wb32(s, 0x01b53530); /* stream length */
             avio_wb16(s, 4); /* unknown */
             avio_wb32(s, 0x39); /* header size */
@@ -239,10 +240,11 @@ static int rv10_write_header(AVFormatContext *ctx,
         } else {
             /* video codec info */
             avio_wb32(s,34); /* size */
+            ffio_wfourcc(s, "VIDO");
             if(stream->enc->codec_id == CODEC_ID_RV10)
-                put_tag(s,"VIDORV10");
+                ffio_wfourcc(s,"RV10");
             else
-                put_tag(s,"VIDORV20");
+                ffio_wfourcc(s,"RV20");
             avio_wb16(s, stream->enc->width);
             avio_wb16(s, stream->enc->height);
             avio_wb16(s, (int) stream->frame_rate); /* frames per seconds ? */
@@ -270,7 +272,7 @@ static int rv10_write_header(AVFormatContext *ctx,
     data_offset_ptr[3] = data_pos;
 
     /* data stream */
-    put_tag(s,"DATA");
+    ffio_wfourcc(s, "DATA");
     avio_wb32(s,data_size + 10 + 8);
     avio_wb16(s,0);
 
@@ -339,7 +341,7 @@ static int rm_write_header(AVFormatContext *s)
 
     if (rv10_write_header(s, 0, 0))
         return AVERROR_INVALIDDATA;
-    put_flush_packet(s->pb);
+    avio_flush(s->pb);
     return 0;
 }
 
@@ -366,7 +368,7 @@ static int rm_write_audio(AVFormatContext *s, const uint8_t *buf, int size, int 
     } else {
         avio_write(pb, buf, size);
     }
-    put_flush_packet(pb);
+    avio_flush(pb);
     stream->nb_frames++;
     av_free(buf1);
     return 0;
@@ -411,7 +413,7 @@ static int rm_write_video(AVFormatContext *s, const uint8_t *buf, int size, int 
     avio_w8(pb, stream->nb_frames & 0xff);
 
     avio_write(pb, buf, size);
-    put_flush_packet(pb);
+    avio_flush(pb);
 
     stream->nb_frames++;
     return 0;
@@ -432,9 +434,9 @@ static int rm_write_trailer(AVFormatContext *s)
     int data_size, index_pos, i;
     AVIOContext *pb = s->pb;
 
-    if (!url_is_streamed(s->pb)) {
+    if (s->pb->seekable) {
         /* end of file: finish to write header */
-        index_pos = url_fseek(pb, 0, SEEK_CUR);
+        index_pos = avio_tell(pb);
         data_size = index_pos - rm->data_pos;
 
         /* FIXME: write index */
@@ -443,7 +445,7 @@ static int rm_write_trailer(AVFormatContext *s)
         avio_wb32(pb, 0);
         avio_wb32(pb, 0);
 
-        url_fseek(pb, 0, SEEK_SET);
+        avio_seek(pb, 0, SEEK_SET);
         for(i=0;i<s->nb_streams;i++)
             rm->streams[i].total_frames = rm->streams[i].nb_frames;
         rv10_write_header(s, data_size, 0);
@@ -452,7 +454,7 @@ static int rm_write_trailer(AVFormatContext *s)
         avio_wb32(pb, 0);
         avio_wb32(pb, 0);
     }
-    put_flush_packet(pb);
+    avio_flush(pb);
     return 0;
 }
 

@@ -125,15 +125,15 @@ static int64_t updatePacketSize(AVIOContext *pb, int64_t pos)
     int64_t curpos;
     int size;
 
-    size = url_ftell(pb) - pos;
+    size = avio_tell(pb) - pos;
     if (size % 4) {
         gxf_write_padding(pb, 4 - size % 4);
-        size = url_ftell(pb) - pos;
+        size = avio_tell(pb) - pos;
     }
-    curpos = url_ftell(pb);
-    url_fseek(pb, pos + 6, SEEK_SET);
+    curpos = avio_tell(pb);
+    avio_seek(pb, pos + 6, SEEK_SET);
     avio_wb32(pb, size);
-    url_fseek(pb, curpos, SEEK_SET);
+    avio_seek(pb, curpos, SEEK_SET);
     return curpos - pos;
 }
 
@@ -141,10 +141,10 @@ static int64_t updateSize(AVIOContext *pb, int64_t pos)
 {
     int64_t curpos;
 
-    curpos = url_ftell(pb);
-    url_fseek(pb, pos, SEEK_SET);
+    curpos = avio_tell(pb);
+    avio_seek(pb, pos, SEEK_SET);
     avio_wb16(pb, curpos - pos - 2);
-    url_fseek(pb, curpos, SEEK_SET);
+    avio_seek(pb, curpos, SEEK_SET);
     return curpos - pos;
 }
 
@@ -218,13 +218,13 @@ static int gxf_write_track_description(AVFormatContext *s, GXFStreamContext *sc,
     avio_w8(pb, sc->media_type + 0x80);
     avio_w8(pb, index + 0xC0);
 
-    pos = url_ftell(pb);
+    pos = avio_tell(pb);
     avio_wb16(pb, 0); /* size */
 
     /* media file name */
     avio_w8(pb, TRACK_NAME);
     avio_w8(pb, strlen(ES_NAME_PATTERN) + 3);
-    put_tag(pb, ES_NAME_PATTERN);
+    avio_write(pb, ES_NAME_PATTERN, sizeof(ES_NAME_PATTERN) - 1);
     avio_wb16(pb, sc->media_info);
     avio_w8(pb, 0);
 
@@ -269,9 +269,10 @@ static int gxf_write_material_data_section(AVFormatContext *s)
     GXFContext *gxf = s->priv_data;
     AVIOContext *pb = s->pb;
     int64_t pos;
+    int len;
     const char *filename = strrchr(s->filename, '/');
 
-    pos = url_ftell(pb);
+    pos = avio_tell(pb);
     avio_wb16(pb, 0); /* size */
 
     /* name */
@@ -279,10 +280,12 @@ static int gxf_write_material_data_section(AVFormatContext *s)
         filename++;
     else
         filename = s->filename;
+    len = strlen(filename);
+
     avio_w8(pb, MAT_NAME);
-    avio_w8(pb, strlen(SERVER_PATH) + strlen(filename) + 1);
-    put_tag(pb, SERVER_PATH);
-    put_tag(pb, filename);
+    avio_w8(pb, strlen(SERVER_PATH) + len + 1);
+    avio_write(pb, SERVER_PATH, sizeof(SERVER_PATH) - 1);
+    avio_write(pb, filename, len);
     avio_w8(pb, 0);
 
     /* first field */
@@ -307,7 +310,7 @@ static int gxf_write_material_data_section(AVFormatContext *s)
     /* estimated size */
     avio_w8(pb, MAT_SIZE);
     avio_w8(pb, 4);
-    avio_wb32(pb, url_fsize(pb) / 1024);
+    avio_wb32(pb, avio_size(pb) / 1024);
 
     return updateSize(pb, pos);
 }
@@ -319,7 +322,7 @@ static int gxf_write_track_description_section(AVFormatContext *s)
     int64_t pos;
     int i;
 
-    pos = url_ftell(pb);
+    pos = avio_tell(pb);
     avio_wb16(pb, 0); /* size */
     for (i = 0; i < s->nb_streams; ++i)
         gxf_write_track_description(s, s->streams[i]->priv_data, i);
@@ -333,7 +336,7 @@ static int gxf_write_map_packet(AVFormatContext *s, int rewrite)
 {
     GXFContext *gxf = s->priv_data;
     AVIOContext *pb = s->pb;
-    int64_t pos = url_ftell(pb);
+    int64_t pos = avio_tell(pb);
 
     if (!rewrite) {
         if (!(gxf->map_offsets_nb % 30)) {
@@ -363,7 +366,7 @@ static int gxf_write_flt_packet(AVFormatContext *s)
 {
     GXFContext *gxf = s->priv_data;
     AVIOContext *pb = s->pb;
-    int64_t pos = url_ftell(pb);
+    int64_t pos = avio_tell(pb);
     int fields_per_flt = (gxf->nb_fields+1) / 1000 + 1;
     int flt_entries = gxf->nb_fields / fields_per_flt;
     int i = 0;
@@ -439,7 +442,7 @@ static int gxf_write_umf_track_description(AVFormatContext *s)
 {
     AVIOContext *pb = s->pb;
     GXFContext *gxf = s->priv_data;
-    int64_t pos = url_ftell(pb);
+    int64_t pos = avio_tell(pb);
     int i;
 
     gxf->umf_track_offset = pos - gxf->umf_start_offset;
@@ -452,7 +455,7 @@ static int gxf_write_umf_track_description(AVFormatContext *s)
     avio_wl16(pb, gxf->timecode_track.media_info);
     avio_wl16(pb, 1);
 
-    return url_ftell(pb) - pos;
+    return avio_tell(pb) - pos;
 }
 
 static int gxf_write_umf_media_mpeg(AVIOContext *pb, AVStream *st)
@@ -530,7 +533,7 @@ static int gxf_write_umf_media_description(AVFormatContext *s)
     int64_t pos;
     int i, j;
 
-    pos = url_ftell(pb);
+    pos = avio_tell(pb);
     gxf->umf_media_offset = pos - gxf->umf_start_offset;
     for (i = 0; i <= s->nb_streams; ++i) {
         GXFStreamContext *sc;
@@ -541,7 +544,7 @@ static int gxf_write_umf_media_description(AVFormatContext *s)
         else
             sc = s->streams[i]->priv_data;
 
-        startpos = url_ftell(pb);
+        startpos = avio_tell(pb);
         avio_wl16(pb, 0); /* length */
         avio_wl16(pb, sc->media_info);
         avio_wl16(pb, 0); /* reserved */
@@ -577,19 +580,19 @@ static int gxf_write_umf_media_description(AVFormatContext *s)
             }
         }
 
-        curpos = url_ftell(pb);
-        url_fseek(pb, startpos, SEEK_SET);
+        curpos = avio_tell(pb);
+        avio_seek(pb, startpos, SEEK_SET);
         avio_wl16(pb, curpos - startpos);
-        url_fseek(pb, curpos, SEEK_SET);
+        avio_seek(pb, curpos, SEEK_SET);
     }
-    return url_ftell(pb) - pos;
+    return avio_tell(pb) - pos;
 }
 
 static int gxf_write_umf_packet(AVFormatContext *s)
 {
     GXFContext *gxf = s->priv_data;
     AVIOContext *pb = s->pb;
-    int64_t pos = url_ftell(pb);
+    int64_t pos = avio_tell(pb);
 
     gxf_write_packet_header(pb, PKT_UMF);
 
@@ -597,12 +600,12 @@ static int gxf_write_umf_packet(AVFormatContext *s)
     avio_w8(pb, 3); /* first and last (only) packet */
     avio_wb32(pb, gxf->umf_length); /* data length */
 
-    gxf->umf_start_offset = url_ftell(pb);
+    gxf->umf_start_offset = avio_tell(pb);
     gxf_write_umf_payload(s);
     gxf_write_umf_material_description(s);
     gxf->umf_track_size = gxf_write_umf_track_description(s);
     gxf->umf_media_size = gxf_write_umf_media_description(s);
-    gxf->umf_length = url_ftell(pb) - gxf->umf_start_offset;
+    gxf->umf_length = avio_tell(pb) - gxf->umf_start_offset;
     return updatePacketSize(pb, pos);
 }
 
@@ -631,7 +634,7 @@ static int gxf_write_header(AVFormatContext *s)
     uint8_t tracks[255] = {0};
     int i, media_info = 0;
 
-    if (url_is_streamed(pb)) {
+    if (!pb->seekable) {
         av_log(s, AV_LOG_ERROR, "gxf muxer does not support streamed output, patch welcome");
         return -1;
     }
@@ -750,13 +753,13 @@ static int gxf_write_header(AVFormatContext *s)
 
     gxf->packet_count = 3;
 
-    put_flush_packet(pb);
+    avio_flush(pb);
     return 0;
 }
 
 static int gxf_write_eos_packet(AVIOContext *pb)
 {
-    int64_t pos = url_ftell(pb);
+    int64_t pos = avio_tell(pb);
 
     gxf_write_packet_header(pb, PKT_EOS);
     return updatePacketSize(pb, pos);
@@ -772,21 +775,21 @@ static int gxf_write_trailer(AVFormatContext *s)
     ff_audio_interleave_close(s);
 
     gxf_write_eos_packet(pb);
-    end = url_ftell(pb);
-    url_fseek(pb, 0, SEEK_SET);
+    end = avio_tell(pb);
+    avio_seek(pb, 0, SEEK_SET);
     /* overwrite map, flt and umf packets with new values */
     gxf_write_map_packet(s, 1);
     gxf_write_flt_packet(s);
     gxf_write_umf_packet(s);
-    put_flush_packet(pb);
+    avio_flush(pb);
     /* update duration in all map packets */
     for (i = 1; i < gxf->map_offsets_nb; i++) {
-        url_fseek(pb, gxf->map_offsets[i], SEEK_SET);
+        avio_seek(pb, gxf->map_offsets[i], SEEK_SET);
         gxf_write_map_packet(s, 1);
-        put_flush_packet(pb);
+        avio_flush(pb);
     }
 
-    url_fseek(pb, end, SEEK_SET);
+    avio_seek(pb, end, SEEK_SET);
 
     av_freep(&gxf->flt_entries);
     av_freep(&gxf->map_offsets);
@@ -858,9 +861,9 @@ static int gxf_write_packet(AVFormatContext *s, AVPacket *pkt)
     GXFContext *gxf = s->priv_data;
     AVIOContext *pb = s->pb;
     AVStream *st = s->streams[pkt->stream_index];
-    int64_t pos = url_ftell(pb);
+    int64_t pos = avio_tell(pb);
     int padding = 0;
-    int packet_start_offset = url_ftell(pb) / 1024;
+    int packet_start_offset = avio_tell(pb) / 1024;
 
     gxf_write_packet_header(pb, PKT_MEDIA);
     if (st->codec->codec_id == CODEC_ID_MPEG2VIDEO && pkt->size % 4) /* MPEG-2 frames must be padded */
@@ -892,7 +895,7 @@ static int gxf_write_packet(AVFormatContext *s, AVPacket *pkt)
         gxf->packet_count = 0;
     }
 
-    put_flush_packet(pb);
+    avio_flush(pb);
 
     return 0;
 }

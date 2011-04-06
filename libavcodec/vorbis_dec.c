@@ -1007,7 +1007,12 @@ static av_cold int vorbis_decode_init(AVCodecContext *avccontext)
     avccontext->channels    = vc->audio_channels;
     avccontext->sample_rate = vc->audio_samplerate;
     avccontext->frame_size  = FFMIN(vc->blocksize[0], vc->blocksize[1]) >> 2;
+    /* ffdshow custom code */
+#if CONFIG_AUDIO_FLOAT
+    avccontext->sample_fmt  = AV_SAMPLE_FMT_FLT;
+#else
     avccontext->sample_fmt  = AV_SAMPLE_FMT_S16;
+#endif
 
     return 0 ;
 }
@@ -1448,7 +1453,7 @@ void vorbis_inverse_coupling(float *mag, float *ang, int blocksize)
 static int vorbis_parse_audio_packet(vorbis_context *vc)
 {
     GetBitContext *gb = &vc->gb;
-
+    FFTContext *mdct;
     uint_fast8_t previous_window = vc->previous_window;
     uint_fast8_t mode_number;
     uint_fast8_t blockflag;
@@ -1552,11 +1557,13 @@ static int vorbis_parse_audio_packet(vorbis_context *vc)
 
 // Dotproduct, MDCT
 
+    mdct = &vc->mdct[blockflag];
+
     for (j = vc->audio_channels-1;j >= 0; j--) {
         ch_floor_ptr = vc->channel_floors   + j           * blocksize / 2;
         ch_res_ptr   = vc->channel_residues + res_chan[j] * blocksize / 2;
         vc->dsp.vector_fmul(ch_floor_ptr, ch_floor_ptr, ch_res_ptr, blocksize / 2);
-        ff_imdct_half(&vc->mdct[blockflag], ch_res_ptr, ch_floor_ptr);
+        mdct->imdct_half(mdct, ch_res_ptr, ch_floor_ptr);
     }
 
 // Overlap/add, save data for next overlapping  FPMATH
@@ -1633,9 +1640,15 @@ static int vorbis_decode_frame(AVCodecContext *avccontext,
                               len * ff_vorbis_channel_layout_offsets[vc->audio_channels - 1][i];
     }
 
+    /* ffdshow custom code */
+#if CONFIG_AUDIO_FLOAT
+    float_interleave(data, channel_ptrs, len, vc->audio_channels);
+    *data_size = len * sizeof(float) * vc->audio_channels;
+#else
     vc->fmt_conv.float_to_int16_interleave(data, channel_ptrs, len,
                                            vc->audio_channels);
     *data_size = len * 2 * vc->audio_channels;
+#endif
 
     return buf_size ;
 }

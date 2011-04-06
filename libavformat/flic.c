@@ -135,7 +135,7 @@ static int flic_read_header(AVFormatContext *s,
         return AVERROR(EIO);
     }
 
-    url_fseek(pb, -FLIC_PREAMBLE_SIZE, SEEK_CUR);
+    avio_seek(pb, -FLIC_PREAMBLE_SIZE, SEEK_CUR);
 
     /* Time to figure out the framerate:
      * If the first preamble's magic number is 0xAAAA then this file is from
@@ -173,7 +173,7 @@ static int flic_read_header(AVFormatContext *s,
         av_set_pts_info(st, 64, FLIC_MC_SPEED, 70);
 
         /* rewind the stream since the first chunk is at offset 12 */
-        url_fseek(pb, 12, SEEK_SET);
+        avio_seek(pb, 12, SEEK_SET);
 
         /* send over abbreviated FLIC header chunk */
         av_free(st->codec->extradata);
@@ -223,7 +223,7 @@ static int flic_read_packet(AVFormatContext *s,
             }
             pkt->stream_index = flic->video_stream_index;
             pkt->pts = flic->frame_number++;
-            pkt->pos = url_ftell(pb);
+            pkt->pos = avio_tell(pb);
             memcpy(pkt->data, preamble, FLIC_PREAMBLE_SIZE);
             ret = avio_read(pb, pkt->data + FLIC_PREAMBLE_SIZE,
                 size - FLIC_PREAMBLE_SIZE);
@@ -239,10 +239,10 @@ static int flic_read_packet(AVFormatContext *s,
             }
 
             /* skip useless 10B sub-header (yes, it's not accounted for in the chunk header) */
-            url_fseek(pb, 10, SEEK_CUR);
+            avio_skip(pb, 10);
 
             pkt->stream_index = flic->audio_stream_index;
-            pkt->pos = url_ftell(pb);
+            pkt->pos = avio_tell(pb);
             ret = avio_read(pb, pkt->data, size);
 
             if (ret != size) {
@@ -253,7 +253,7 @@ static int flic_read_packet(AVFormatContext *s,
             packet_read = 1;
         } else {
             /* not interested in this chunk */
-            url_fseek(pb, size - 6, SEEK_CUR);
+            avio_skip(pb, size - 6);
         }
     }
 

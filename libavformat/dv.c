@@ -370,7 +370,7 @@ static int64_t dv_frame_offset(AVFormatContext *s, DVDemuxContext *c,
     // FIXME: sys may be wrong if last dv_read_packet() failed (buffer is junk)
     const DVprofile* sys = ff_dv_codec_profile(c->vst->codec);
     int64_t offset;
-    int64_t size = url_fsize(s->pb) - s->data_offset;
+    int64_t size = avio_size(s->pb) - s->data_offset;
     int64_t max_offset = ((size-1) / sys->frame_size) * sys->frame_size;
 
     offset = sys->frame_size * timestamp;
@@ -417,9 +417,9 @@ static int dv_read_header(AVFormatContext *s,
             return -1;
         }
         if (state == 0x003f0700 || state == 0xff3f0700)
-            marker_pos = url_ftell(s->pb);
-        if (state == 0xff3f0701 && url_ftell(s->pb) - marker_pos == 80) {
-            url_fseek(s->pb, -163, SEEK_CUR);
+            marker_pos = avio_tell(s->pb);
+        if (state == 0xff3f0701 && avio_tell(s->pb) - marker_pos == 80) {
+            avio_seek(s->pb, -163, SEEK_CUR);
             state = avio_rb32(s->pb);
             break;
         }
@@ -428,7 +428,7 @@ static int dv_read_header(AVFormatContext *s,
     AV_WB32(c->buf, state);
 
     if (avio_read(s->pb, c->buf + 4, DV_PROFILE_BYTES - 4) <= 0 ||
-        url_fseek(s->pb, -DV_PROFILE_BYTES, SEEK_CUR) < 0)
+        avio_seek(s->pb, -DV_PROFILE_BYTES, SEEK_CUR) < 0)
         return AVERROR(EIO);
 
     c->dv_demux->sys = ff_dv_frame_profile(c->dv_demux->sys, c->buf, DV_PROFILE_BYTES);
@@ -473,7 +473,7 @@ static int dv_read_seek(AVFormatContext *s, int stream_index,
 
     dv_offset_reset(c, offset / c->sys->frame_size);
 
-    offset = url_fseek(s->pb, offset, SEEK_SET);
+    offset = avio_seek(s->pb, offset, SEEK_SET);
     return (offset < 0) ? offset : 0;
 }
 

@@ -33,6 +33,8 @@
 #include "libavformat/os_support.h"
 #include "libavformat/rtpdec.h"
 #include "libavformat/rtsp.h"
+// XXX for ffio_open_dyn_packet_buffer, to be removed
+#include "libavformat/avio_internal.h"
 #include "libavutil/avstring.h"
 #include "libavutil/lfg.h"
 #include "libavutil/random_seed.h"
@@ -869,10 +871,10 @@ static void close_connection(HTTPContext *c)
     if (!c->last_packet_sent && c->state == HTTPSTATE_SEND_DATA_TRAILER) {
         if (ctx->oformat) {
             /* prepare header */
-            if (url_open_dyn_buf(&ctx->pb) >= 0) {
+            if (avio_open_dyn_buf(&ctx->pb) >= 0) {
                 av_write_trailer(ctx);
                 av_freep(&c->pb_buffer);
-                url_close_dyn_buf(ctx->pb, &c->pb_buffer);
+                avio_close_dyn_buf(ctx->pb, &c->pb_buffer);
             }
         }
     }
@@ -1861,7 +1863,7 @@ static void fmt_bytecount(AVIOContext *pb, int64_t count)
 
     for (s = suffix; count >= 100000 && s[1]; count /= 1000, s++);
 
-    url_fprintf(pb, "%"PRId64"%c", count, *s);
+    avio_printf(pb, "%"PRId64"%c", count, *s);
 }
 
 static void compute_status(HTTPContext *c)
@@ -1873,27 +1875,27 @@ static void compute_status(HTTPContext *c)
     int i, len;
     AVIOContext *pb;
 
-    if (url_open_dyn_buf(&pb) < 0) {
+    if (avio_open_dyn_buf(&pb) < 0) {
         /* XXX: return an error ? */
         c->buffer_ptr = c->buffer;
         c->buffer_end = c->buffer;
         return;
     }
 
-    url_fprintf(pb, "HTTP/1.0 200 OK\r\n");
-    url_fprintf(pb, "Content-type: %s\r\n", "text/html");
-    url_fprintf(pb, "Pragma: no-cache\r\n");
-    url_fprintf(pb, "\r\n");
+    avio_printf(pb, "HTTP/1.0 200 OK\r\n");
+    avio_printf(pb, "Content-type: %s\r\n", "text/html");
+    avio_printf(pb, "Pragma: no-cache\r\n");
+    avio_printf(pb, "\r\n");
 
-    url_fprintf(pb, "<html><head><title>%s Status</title>\n", program_name);
+    avio_printf(pb, "<html><head><title>%s Status</title>\n", program_name);
     if (c->stream->feed_filename[0])
-        url_fprintf(pb, "<link rel=\"shortcut icon\" href=\"%s\">\n", c->stream->feed_filename);
-    url_fprintf(pb, "</head>\n<body>");
-    url_fprintf(pb, "<h1>%s Status</h1>\n", program_name);
+        avio_printf(pb, "<link rel=\"shortcut icon\" href=\"%s\">\n", c->stream->feed_filename);
+    avio_printf(pb, "</head>\n<body>");
+    avio_printf(pb, "<h1>%s Status</h1>\n", program_name);
     /* format status */
-    url_fprintf(pb, "<h2>Available Streams</h2>\n");
-    url_fprintf(pb, "<table cellspacing=0 cellpadding=4>\n");
-    url_fprintf(pb, "<tr><th valign=top>Path<th align=left>Served<br>Conns<th><br>bytes<th valign=top>Format<th>Bit rate<br>kbits/s<th align=left>Video<br>kbits/s<th><br>Codec<th align=left>Audio<br>kbits/s<th><br>Codec<th align=left valign=top>Feed\n");
+    avio_printf(pb, "<h2>Available Streams</h2>\n");
+    avio_printf(pb, "<table cellspacing=0 cellpadding=4>\n");
+    avio_printf(pb, "<tr><th valign=top>Path<th align=left>Served<br>Conns<th><br>bytes<th valign=top>Format<th>Bit rate<br>kbits/s<th align=left>Video<br>kbits/s<th><br>Codec<th align=left>Audio<br>kbits/s<th><br>Codec<th align=left valign=top>Feed\n");
     stream = first_stream;
     while (stream != NULL) {
         char sfilename[1024];
@@ -1921,9 +1923,9 @@ static void compute_status(HTTPContext *c)
                 }
             }
 
-            url_fprintf(pb, "<tr><td><a href=\"/%s\">%s</a> ",
+            avio_printf(pb, "<tr><td><a href=\"/%s\">%s</a> ",
                          sfilename, stream->filename);
-            url_fprintf(pb, "<td align=right> %d <td align=right> ",
+            avio_printf(pb, "<td align=right> %d <td align=right> ",
                         stream->conns_served);
             fmt_bytecount(pb, stream->bytes_served);
             switch(stream->stream_type) {
@@ -1962,33 +1964,33 @@ static void compute_status(HTTPContext *c)
                             abort();
                         }
                     }
-                    url_fprintf(pb, "<td align=center> %s <td align=right> %d <td align=right> %d <td> %s %s <td align=right> %d <td> %s %s",
+                    avio_printf(pb, "<td align=center> %s <td align=right> %d <td align=right> %d <td> %s %s <td align=right> %d <td> %s %s",
                                  stream->fmt->name,
                                  stream->bandwidth,
                                  video_bit_rate / 1000, video_codec_name, video_codec_name_extra,
                                  audio_bit_rate / 1000, audio_codec_name, audio_codec_name_extra);
                     if (stream->feed)
-                        url_fprintf(pb, "<td>%s", stream->feed->filename);
+                        avio_printf(pb, "<td>%s", stream->feed->filename);
                     else
-                        url_fprintf(pb, "<td>%s", stream->feed_filename);
-                    url_fprintf(pb, "\n");
+                        avio_printf(pb, "<td>%s", stream->feed_filename);
+                    avio_printf(pb, "\n");
                 }
                 break;
             default:
-                url_fprintf(pb, "<td align=center> - <td align=right> - <td align=right> - <td><td align=right> - <td>\n");
+                avio_printf(pb, "<td align=center> - <td align=right> - <td align=right> - <td><td align=right> - <td>\n");
                 break;
             }
         }
         stream = stream->next;
     }
-    url_fprintf(pb, "</table>\n");
+    avio_printf(pb, "</table>\n");
 
     stream = first_stream;
     while (stream != NULL) {
         if (stream->feed == stream) {
-            url_fprintf(pb, "<h2>Feed %s</h2>", stream->filename);
+            avio_printf(pb, "<h2>Feed %s</h2>", stream->filename);
             if (stream->pid) {
-                url_fprintf(pb, "Running as pid %d.\n", stream->pid);
+                avio_printf(pb, "Running as pid %d.\n", stream->pid);
 
 #if defined(linux) && !defined(CONFIG_NOCUTILS)
                 {
@@ -2007,7 +2009,7 @@ static void compute_status(HTTPContext *c)
 
                         if (fscanf(pid_stat, "%10s %64s", cpuperc,
                                    cpuused) == 2) {
-                            url_fprintf(pb, "Currently using %s%% of the cpu. Total time used %s.\n",
+                            avio_printf(pb, "Currently using %s%% of the cpu. Total time used %s.\n",
                                          cpuperc, cpuused);
                         }
                         fclose(pid_stat);
@@ -2015,9 +2017,9 @@ static void compute_status(HTTPContext *c)
                 }
 #endif
 
-                url_fprintf(pb, "<p>");
+                avio_printf(pb, "<p>");
             }
-            url_fprintf(pb, "<table cellspacing=0 cellpadding=4><tr><th>Stream<th>type<th>kbits/s<th align=left>codec<th align=left>Parameters\n");
+            avio_printf(pb, "<table cellspacing=0 cellpadding=4><tr><th>Stream<th>type<th>kbits/s<th align=left>codec<th align=left>Parameters\n");
 
             for (i = 0; i < stream->nb_streams; i++) {
                 AVStream *st = stream->streams[i];
@@ -2040,26 +2042,26 @@ static void compute_status(HTTPContext *c)
                 default:
                     abort();
                 }
-                url_fprintf(pb, "<tr><td align=right>%d<td>%s<td align=right>%d<td>%s<td>%s\n",
+                avio_printf(pb, "<tr><td align=right>%d<td>%s<td align=right>%d<td>%s<td>%s\n",
                         i, type, st->codec->bit_rate/1000, codec ? codec->name : "", parameters);
             }
-            url_fprintf(pb, "</table>\n");
+            avio_printf(pb, "</table>\n");
 
         }
         stream = stream->next;
     }
 
     /* connection status */
-    url_fprintf(pb, "<h2>Connection Status</h2>\n");
+    avio_printf(pb, "<h2>Connection Status</h2>\n");
 
-    url_fprintf(pb, "Number of connections: %d / %d<br>\n",
+    avio_printf(pb, "Number of connections: %d / %d<br>\n",
                  nb_connections, nb_max_connections);
 
-    url_fprintf(pb, "Bandwidth in use: %"PRIu64"k / %"PRIu64"k<br>\n",
+    avio_printf(pb, "Bandwidth in use: %"PRIu64"k / %"PRIu64"k<br>\n",
                  current_bandwidth, max_bandwidth);
 
-    url_fprintf(pb, "<table>\n");
-    url_fprintf(pb, "<tr><th>#<th>File<th>IP<th>Proto<th>State<th>Target bits/sec<th>Actual bits/sec<th>Bytes transferred\n");
+    avio_printf(pb, "<table>\n");
+    avio_printf(pb, "<tr><th>#<th>File<th>IP<th>Proto<th>State<th>Target bits/sec<th>Actual bits/sec<th>Bytes transferred\n");
     c1 = first_http_ctx;
     i = 0;
     while (c1 != NULL) {
@@ -2078,7 +2080,7 @@ static void compute_status(HTTPContext *c)
 
         i++;
         p = inet_ntoa(c1->from_addr.sin_addr);
-        url_fprintf(pb, "<tr><td><b>%d</b><td>%s%s<td>%s<td>%s<td>%s<td align=right>",
+        avio_printf(pb, "<tr><td><b>%d</b><td>%s%s<td>%s<td>%s<td>%s<td align=right>",
                     i,
                     c1->stream ? c1->stream->filename : "",
                     c1->state == HTTPSTATE_RECEIVE_DATA ? "(input)" : "",
@@ -2086,22 +2088,22 @@ static void compute_status(HTTPContext *c)
                     c1->protocol,
                     http_state[c1->state]);
         fmt_bytecount(pb, bitrate);
-        url_fprintf(pb, "<td align=right>");
+        avio_printf(pb, "<td align=right>");
         fmt_bytecount(pb, compute_datarate(&c1->datarate, c1->data_count) * 8);
-        url_fprintf(pb, "<td align=right>");
+        avio_printf(pb, "<td align=right>");
         fmt_bytecount(pb, c1->data_count);
-        url_fprintf(pb, "\n");
+        avio_printf(pb, "\n");
         c1 = c1->next;
     }
-    url_fprintf(pb, "</table>\n");
+    avio_printf(pb, "</table>\n");
 
     /* date */
     ti = time(NULL);
     p = ctime(&ti);
-    url_fprintf(pb, "<hr size=1 noshade>Generated at %s", p);
-    url_fprintf(pb, "</body>\n</html>\n");
+    avio_printf(pb, "<hr size=1 noshade>Generated at %s", p);
+    avio_printf(pb, "</body>\n</html>\n");
 
-    len = url_close_dyn_buf(pb, &c->pb_buffer);
+    len = avio_close_dyn_buf(pb, &c->pb_buffer);
     c->buffer_ptr = c->pb_buffer;
     c->buffer_end = c->pb_buffer + len;
 }
@@ -2256,11 +2258,11 @@ static int http_prepare_data(HTTPContext *c)
         c->got_key_frame = 0;
 
         /* prepare header and save header data in a stream */
-        if (url_open_dyn_buf(&c->fmt_ctx.pb) < 0) {
+        if (avio_open_dyn_buf(&c->fmt_ctx.pb) < 0) {
             /* XXX: potential leak */
             return -1;
         }
-        c->fmt_ctx.pb->is_streamed = 1;
+        c->fmt_ctx.pb->seekable = 0;
 
         /*
          * HACK to avoid mpeg ps muxer to spit many underflow errors
@@ -2277,7 +2279,7 @@ static int http_prepare_data(HTTPContext *c)
         }
         av_metadata_free(&c->fmt_ctx.metadata);
 
-        len = url_close_dyn_buf(c->fmt_ctx.pb, &c->pb_buffer);
+        len = avio_close_dyn_buf(c->fmt_ctx.pb, &c->pb_buffer);
         c->buffer_ptr = c->pb_buffer;
         c->buffer_end = c->pb_buffer + len;
 
@@ -2389,9 +2391,9 @@ static int http_prepare_data(HTTPContext *c)
                             max_packet_size = RTSP_TCP_MAX_PACKET_SIZE;
                         else
                             max_packet_size = url_get_max_packet_size(c->rtp_handles[c->packet_stream_index]);
-                        ret = url_open_dyn_packet_buf(&ctx->pb, max_packet_size);
+                        ret = ffio_open_dyn_packet_buf(&ctx->pb, max_packet_size);
                     } else {
-                        ret = url_open_dyn_buf(&ctx->pb);
+                        ret = avio_open_dyn_buf(&ctx->pb);
                     }
                     if (ret < 0) {
                         /* XXX: potential leak */
@@ -2399,7 +2401,7 @@ static int http_prepare_data(HTTPContext *c)
                     }
                     ost = ctx->streams[pkt.stream_index];
 
-                    ctx->pb->is_streamed = 1;
+                    ctx->pb->seekable = 0;
                     if (pkt.dts != AV_NOPTS_VALUE)
                         pkt.dts = av_rescale_q(pkt.dts, ist->time_base, ost->time_base);
                     if (pkt.pts != AV_NOPTS_VALUE)
@@ -2410,7 +2412,7 @@ static int http_prepare_data(HTTPContext *c)
                         c->state = HTTPSTATE_SEND_DATA_TRAILER;
                     }
 
-                    len = url_close_dyn_buf(ctx->pb, &c->pb_buffer);
+                    len = avio_close_dyn_buf(ctx->pb, &c->pb_buffer);
                     c->cur_frame_bytes = len;
                     c->buffer_ptr = c->pb_buffer;
                     c->buffer_end = c->pb_buffer + len;
@@ -2432,13 +2434,13 @@ static int http_prepare_data(HTTPContext *c)
             return -1;
         ctx = &c->fmt_ctx;
         /* prepare header */
-        if (url_open_dyn_buf(&ctx->pb) < 0) {
+        if (avio_open_dyn_buf(&ctx->pb) < 0) {
             /* XXX: potential leak */
             return -1;
         }
-        c->fmt_ctx.pb->is_streamed = 1;
+        c->fmt_ctx.pb->seekable = 0;
         av_write_trailer(ctx);
-        len = url_close_dyn_buf(ctx->pb, &c->pb_buffer);
+        len = avio_close_dyn_buf(ctx->pb, &c->pb_buffer);
         c->buffer_ptr = c->pb_buffer;
         c->buffer_end = c->pb_buffer + len;
 
@@ -2503,7 +2505,7 @@ static int http_send_data(HTTPContext *c)
                     /* if already sending something, then wait. */
                     if (rtsp_c->state != RTSPSTATE_WAIT_REQUEST)
                         break;
-                    if (url_open_dyn_buf(&pb) < 0)
+                    if (avio_open_dyn_buf(&pb) < 0)
                         goto fail1;
                     interleaved_index = c->packet_stream_index * 2;
                     /* RTCP packets are sent at odd indexes */
@@ -2518,7 +2520,7 @@ static int http_send_data(HTTPContext *c)
                     /* write RTP packet data */
                     c->buffer_ptr += 4;
                     avio_write(pb, c->buffer_ptr, len);
-                    size = url_close_dyn_buf(pb, &c->packet_buffer);
+                    size = avio_close_dyn_buf(pb, &c->packet_buffer);
                     /* prepare asynchronous TCP sending */
                     rtsp_c->packet_buffer_ptr = c->packet_buffer;
                     rtsp_c->packet_buffer_end = c->packet_buffer + size;
@@ -2721,8 +2723,9 @@ static int http_receive_data(HTTPContext *c)
             if (!fmt_in)
                 goto fail;
 
-            url_open_buf(&pb, c->buffer, c->buffer_end - c->buffer, URL_RDONLY);
-            pb->is_streamed = 1;
+            pb = avio_alloc_context(c->buffer, c->buffer_end - c->buffer,
+                                    0, NULL, NULL, NULL, NULL);
+            pb->seekable = 0;
 
             if (av_open_input_stream(&s, pb, c->stream->feed_filename, fmt_in, NULL) < 0) {
                 av_free(pb);
@@ -2812,20 +2815,20 @@ static void rtsp_reply_header(HTTPContext *c, enum RTSPStatusCode error_number)
         break;
     }
 
-    url_fprintf(c->pb, "RTSP/1.0 %d %s\r\n", error_number, str);
-    url_fprintf(c->pb, "CSeq: %d\r\n", c->seq);
+    avio_printf(c->pb, "RTSP/1.0 %d %s\r\n", error_number, str);
+    avio_printf(c->pb, "CSeq: %d\r\n", c->seq);
 
     /* output GMT time */
     ti = time(NULL);
     tm = gmtime(&ti);
     strftime(buf2, sizeof(buf2), "%a, %d %b %Y %H:%M:%S", tm);
-    url_fprintf(c->pb, "Date: %s GMT\r\n", buf2);
+    avio_printf(c->pb, "Date: %s GMT\r\n", buf2);
 }
 
 static void rtsp_reply_error(HTTPContext *c, enum RTSPStatusCode error_number)
 {
     rtsp_reply_header(c, error_number);
-    url_fprintf(c->pb, "\r\n");
+    avio_printf(c->pb, "\r\n");
 }
 
 static int rtsp_parse_request(HTTPContext *c)
@@ -2849,7 +2852,7 @@ static int rtsp_parse_request(HTTPContext *c)
     av_strlcpy(c->url, url, sizeof(c->url));
     av_strlcpy(c->protocol, protocol, sizeof(c->protocol));
 
-    if (url_open_dyn_buf(&c->pb) < 0) {
+    if (avio_open_dyn_buf(&c->pb) < 0) {
         /* XXX: cannot do more */
         c->pb = NULL; /* safety */
         return -1;
@@ -2906,7 +2909,7 @@ static int rtsp_parse_request(HTTPContext *c)
         rtsp_reply_error(c, RTSP_STATUS_METHOD);
 
  the_end:
-    len = url_close_dyn_buf(c->pb, &c->pb_buffer);
+    len = avio_close_dyn_buf(c->pb, &c->pb_buffer);
     c->pb = NULL; /* safety */
     if (len < 0) {
         /* XXX: cannot do more */
@@ -2970,10 +2973,10 @@ static int prepare_sdp_description(FFStream *stream, uint8_t **pbuffer,
 static void rtsp_cmd_options(HTTPContext *c, const char *url)
 {
 //    rtsp_reply_header(c, RTSP_STATUS_OK);
-    url_fprintf(c->pb, "RTSP/1.0 %d %s\r\n", RTSP_STATUS_OK, "OK");
-    url_fprintf(c->pb, "CSeq: %d\r\n", c->seq);
-    url_fprintf(c->pb, "Public: %s\r\n", "OPTIONS, DESCRIBE, SETUP, TEARDOWN, PLAY, PAUSE");
-    url_fprintf(c->pb, "\r\n");
+    avio_printf(c->pb, "RTSP/1.0 %d %s\r\n", RTSP_STATUS_OK, "OK");
+    avio_printf(c->pb, "CSeq: %d\r\n", c->seq);
+    avio_printf(c->pb, "Public: %s\r\n", "OPTIONS, DESCRIBE, SETUP, TEARDOWN, PLAY, PAUSE");
+    avio_printf(c->pb, "\r\n");
 }
 
 static void rtsp_cmd_describe(HTTPContext *c, const char *url)
@@ -3014,10 +3017,10 @@ static void rtsp_cmd_describe(HTTPContext *c, const char *url)
         return;
     }
     rtsp_reply_header(c, RTSP_STATUS_OK);
-    url_fprintf(c->pb, "Content-Base: %s/\r\n", url);
-    url_fprintf(c->pb, "Content-Type: application/sdp\r\n");
-    url_fprintf(c->pb, "Content-Length: %d\r\n", content_length);
-    url_fprintf(c->pb, "\r\n");
+    avio_printf(c->pb, "Content-Base: %s/\r\n", url);
+    avio_printf(c->pb, "Content-Type: application/sdp\r\n");
+    avio_printf(c->pb, "Content-Length: %d\r\n", content_length);
+    avio_printf(c->pb, "\r\n");
     avio_write(c->pb, content, content_length);
     av_free(content);
 }
@@ -3163,30 +3166,30 @@ static void rtsp_cmd_setup(HTTPContext *c, const char *url,
     /* now everything is OK, so we can send the connection parameters */
     rtsp_reply_header(c, RTSP_STATUS_OK);
     /* session ID */
-    url_fprintf(c->pb, "Session: %s\r\n", rtp_c->session_id);
+    avio_printf(c->pb, "Session: %s\r\n", rtp_c->session_id);
 
     switch(rtp_c->rtp_protocol) {
     case RTSP_LOWER_TRANSPORT_UDP:
         rtp_port = rtp_get_local_rtp_port(rtp_c->rtp_handles[stream_index]);
         rtcp_port = rtp_get_local_rtcp_port(rtp_c->rtp_handles[stream_index]);
-        url_fprintf(c->pb, "Transport: RTP/AVP/UDP;unicast;"
+        avio_printf(c->pb, "Transport: RTP/AVP/UDP;unicast;"
                     "client_port=%d-%d;server_port=%d-%d",
                     th->client_port_min, th->client_port_max,
                     rtp_port, rtcp_port);
         break;
     case RTSP_LOWER_TRANSPORT_TCP:
-        url_fprintf(c->pb, "Transport: RTP/AVP/TCP;interleaved=%d-%d",
+        avio_printf(c->pb, "Transport: RTP/AVP/TCP;interleaved=%d-%d",
                     stream_index * 2, stream_index * 2 + 1);
         break;
     default:
         break;
     }
     if (setup.transport_option[0] != '\0')
-        url_fprintf(c->pb, ";%s", setup.transport_option);
-    url_fprintf(c->pb, "\r\n");
+        avio_printf(c->pb, ";%s", setup.transport_option);
+    avio_printf(c->pb, "\r\n");
 
 
-    url_fprintf(c->pb, "\r\n");
+    avio_printf(c->pb, "\r\n");
 }
 
 
@@ -3248,8 +3251,8 @@ static void rtsp_cmd_play(HTTPContext *c, const char *url, RTSPMessageHeader *h)
     /* now everything is OK, so we can send the connection parameters */
     rtsp_reply_header(c, RTSP_STATUS_OK);
     /* session ID */
-    url_fprintf(c->pb, "Session: %s\r\n", rtp_c->session_id);
-    url_fprintf(c->pb, "\r\n");
+    avio_printf(c->pb, "Session: %s\r\n", rtp_c->session_id);
+    avio_printf(c->pb, "\r\n");
 }
 
 static void rtsp_cmd_pause(HTTPContext *c, const char *url, RTSPMessageHeader *h)
@@ -3273,8 +3276,8 @@ static void rtsp_cmd_pause(HTTPContext *c, const char *url, RTSPMessageHeader *h
     /* now everything is OK, so we can send the connection parameters */
     rtsp_reply_header(c, RTSP_STATUS_OK);
     /* session ID */
-    url_fprintf(c->pb, "Session: %s\r\n", rtp_c->session_id);
-    url_fprintf(c->pb, "\r\n");
+    avio_printf(c->pb, "Session: %s\r\n", rtp_c->session_id);
+    avio_printf(c->pb, "\r\n");
 }
 
 static void rtsp_cmd_teardown(HTTPContext *c, const char *url, RTSPMessageHeader *h)
@@ -3296,8 +3299,8 @@ static void rtsp_cmd_teardown(HTTPContext *c, const char *url, RTSPMessageHeader
     /* now everything is OK, so we can send the connection parameters */
     rtsp_reply_header(c, RTSP_STATUS_OK);
     /* session ID */
-    url_fprintf(c->pb, "Session: %s\r\n", session_id);
-    url_fprintf(c->pb, "\r\n");
+    avio_printf(c->pb, "Session: %s\r\n", session_id);
+    avio_printf(c->pb, "\r\n");
 }
 
 
@@ -3443,7 +3446,7 @@ static int rtp_new_av_stream(HTTPContext *c,
              c->stream->filename, stream_index, c->protocol);
 
     /* normally, no packets should be output here, but the packet size may be checked */
-    if (url_open_dyn_packet_buf(&ctx->pb, max_packet_size) < 0) {
+    if (ffio_open_dyn_packet_buf(&ctx->pb, max_packet_size) < 0) {
         /* XXX: close stream */
         goto fail;
     }
@@ -3455,7 +3458,7 @@ static int rtp_new_av_stream(HTTPContext *c,
         av_free(ctx);
         return -1;
     }
-    url_close_dyn_buf(ctx->pb, &dummy_buf);
+    avio_close_dyn_buf(ctx->pb, &dummy_buf);
     av_free(dummy_buf);
 
     c->rtp_ctx[stream_index] = ctx;

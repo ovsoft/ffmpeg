@@ -70,7 +70,7 @@ static int swf_read_header(AVFormatContext *s, AVFormatParameters *ap)
     /* skip rectangle size */
     nbits = avio_r8(pb) >> 3;
     len = (4 * nbits - 3 + 7) / 8;
-    url_fskip(pb, len);
+    avio_skip(pb, len);
     swf->frame_rate = avio_rl16(pb); /* 8.8 fixed */
     avio_rl16(pb); /* frame count */
 
@@ -87,7 +87,7 @@ static int swf_read_packet(AVFormatContext *s, AVPacket *pkt)
     int tag, len, i, frame, v;
 
     for(;;) {
-        uint64_t pos = url_ftell(pb);
+        uint64_t pos = avio_tell(pb);
         tag = get_swf_tag(pb, &len);
         if (tag < 0)
             return AVERROR(EIO);
@@ -159,7 +159,7 @@ static int swf_read_packet(AVFormatContext *s, AVPacket *pkt)
                 st = s->streams[i];
                 if (st->codec->codec_type == AVMEDIA_TYPE_AUDIO && st->id == -1) {
             if (st->codec->codec_id == CODEC_ID_MP3) {
-                url_fskip(pb, 4);
+                avio_skip(pb, 4);
                 av_get_packet(pb, pkt, len-4);
             } else { // ADPCM, PCM
                 av_get_packet(pb, pkt, len);
@@ -202,7 +202,7 @@ static int swf_read_packet(AVFormatContext *s, AVPacket *pkt)
             return pkt->size;
         }
     skip:
-        url_fskip(pb, len);
+        avio_skip(pb, len);
     }
     return 0;
 }

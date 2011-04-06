@@ -214,6 +214,8 @@ unknown_opt:
                     fprintf(stderr, "%s: failed to set value '%s' for option '%s'\n", argv[0], arg, opt);
                     exit(1);
                 }
+            } else if (po->flags & OPT_DUMMY) {
+                /* Do nothing for this option */
             } else {
                 po->u.func_arg(arg);
             }
@@ -506,16 +508,6 @@ void show_license(void)
     );
 }
 
-void list_fmts(void (*get_fmt_string)(char *buf, int buf_size, int fmt), int nb_fmts)
-{
-    int i;
-    char fmt_str[128];
-    for (i=-1; i < nb_fmts; i++) {
-        get_fmt_string (fmt_str, sizeof(fmt_str), i);
-        fprintf(stdout, "%s\n", fmt_str);
-    }
-}
-
 void show_formats(void)
 {
     AVInputFormat *ifmt=NULL;
@@ -746,33 +738,6 @@ int read_file(const char *filename, char **bufptr, size_t *size)
 
     fclose(f);
     return 0;
-}
-
-void init_pts_correction(PtsCorrectionContext *ctx)
-{
-    ctx->num_faulty_pts = ctx->num_faulty_dts = 0;
-    ctx->last_pts = ctx->last_dts = INT64_MIN;
-}
-
-int64_t guess_correct_pts(PtsCorrectionContext *ctx, int64_t reordered_pts, int64_t dts)
-{
-    int64_t pts = AV_NOPTS_VALUE;
-
-    if (dts != AV_NOPTS_VALUE) {
-        ctx->num_faulty_dts += dts <= ctx->last_dts;
-        ctx->last_dts = dts;
-    }
-    if (reordered_pts != AV_NOPTS_VALUE) {
-        ctx->num_faulty_pts += reordered_pts <= ctx->last_pts;
-        ctx->last_pts = reordered_pts;
-    }
-    if ((ctx->num_faulty_pts<=ctx->num_faulty_dts || dts == AV_NOPTS_VALUE)
-       && reordered_pts != AV_NOPTS_VALUE)
-        pts = reordered_pts;
-    else
-        pts = dts;
-
-    return pts;
 }
 
 FILE *get_preset_file(char *filename, size_t filename_size,

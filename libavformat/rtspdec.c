@@ -28,6 +28,7 @@
 #include "os_support.h"
 #include "rtsp.h"
 #include "rdt.h"
+#include "url.h"
 
 //#define DEBUG
 //#define DEBUG_RTP_TCP
@@ -60,8 +61,9 @@ static int rtsp_read_play(AVFormatContext *s)
             cmd[0] = 0;
         } else {
             snprintf(cmd, sizeof(cmd),
-                     "Range: npt=%0.3f-\r\n",
-                     (double)rt->seek_timestamp / AV_TIME_BASE);
+                     "Range: npt=%"PRId64".%03"PRId64"-\r\n",
+                     rt->seek_timestamp / AV_TIME_BASE,
+                     rt->seek_timestamp / (AV_TIME_BASE / 1000) % 1000);
         }
         ff_rtsp_send_cmd(s, "PLAY", rt->control_uri, cmd, reply, NULL);
         if (reply->status_code != RTSP_STATUS_OK) {
@@ -199,7 +201,7 @@ redo:
         if (rt->state != RTSP_STATE_STREAMING)
             return 0;
     }
-    ret = url_read_complete(rt->rtsp_hd, buf, 3);
+    ret = ffurl_read_complete(rt->rtsp_hd, buf, 3);
     if (ret != 3)
         return -1;
     id  = buf[0];
@@ -210,7 +212,7 @@ redo:
     if (len > buf_size || len < 12)
         goto redo;
     /* get the data */
-    ret = url_read_complete(rt->rtsp_hd, buf, len);
+    ret = ffurl_read_complete(rt->rtsp_hd, buf, len);
     if (ret != len)
         return -1;
     if (rt->transport == RTSP_TRANSPORT_RDT &&
@@ -339,7 +341,7 @@ retry:
 
     /* send dummy request to keep TCP connection alive */
     if ((av_gettime() - rt->last_cmd_time) / 1000000 >= rt->timeout / 2) {
-        if (rt->server_type == RTSP_SERVER_WMS) {
+        if (rt->server_type != RTSP_SERVER_REAL) {
             ff_rtsp_send_cmd_async(s, "GET_PARAMETER", rt->control_uri, NULL);
         } else {
             ff_rtsp_send_cmd_async(s, "OPTIONS", "*", NULL);

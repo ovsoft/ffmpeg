@@ -106,30 +106,30 @@ static int read_kuki_chunk(AVFormatContext *s, int64_t size)
         int strt, skip;
         MOVAtom atom;
 
-        strt = url_ftell(pb);
+        strt = avio_tell(pb);
         ff_mov_read_esds(s, pb, atom);
-        skip = size - (url_ftell(pb) - strt);
+        skip = size - (avio_tell(pb) - strt);
         if (skip < 0 || !st->codec->extradata ||
             st->codec->codec_id != CODEC_ID_AAC) {
             av_log(s, AV_LOG_ERROR, "invalid AAC magic cookie\n");
             return AVERROR_INVALIDDATA;
         }
-        url_fskip(pb, skip);
+        avio_skip(pb, skip);
     } else if (st->codec->codec_id == CODEC_ID_ALAC) {
 #define ALAC_PREAMBLE 12
 #define ALAC_HEADER   36
         if (size < ALAC_PREAMBLE + ALAC_HEADER) {
             av_log(s, AV_LOG_ERROR, "invalid ALAC magic cookie\n");
-            url_fskip(pb, size);
+            avio_skip(pb, size);
             return AVERROR_INVALIDDATA;
         }
-        url_fskip(pb, ALAC_PREAMBLE);
+        avio_skip(pb, ALAC_PREAMBLE);
         st->codec->extradata = av_mallocz(ALAC_HEADER + FF_INPUT_BUFFER_PADDING_SIZE);
         if (!st->codec->extradata)
             return AVERROR(ENOMEM);
         avio_read(pb, st->codec->extradata, ALAC_HEADER);
         st->codec->extradata_size = ALAC_HEADER;
-        url_fskip(pb, size - ALAC_PREAMBLE - ALAC_HEADER);
+        avio_skip(pb, size - ALAC_PREAMBLE - ALAC_HEADER);
     } else {
         st->codec->extradata = av_mallocz(size + FF_INPUT_BUFFER_PADDING_SIZE);
         if (!st->codec->extradata)
@@ -150,7 +150,7 @@ static int read_pakt_chunk(AVFormatContext *s, int64_t size)
     int64_t pos = 0, ccount;
     int num_packets, i;
 
-    ccount = url_ftell(pb);
+    ccount = avio_tell(pb);
 
     num_packets = avio_rb64(pb);
     if (num_packets < 0 || INT32_MAX / sizeof(AVIndexEntry) < num_packets)
@@ -167,7 +167,7 @@ static int read_pakt_chunk(AVFormatContext *s, int64_t size)
         st->duration += caf->frames_per_packet ? caf->frames_per_packet : ff_mp4_read_descr_len(pb);
     }
 
-    if (url_ftell(pb) - ccount != size) {
+    if (avio_tell(pb) - ccount != size) {
         av_log(s, AV_LOG_ERROR, "error reading packet table\n");
         return -1;
     }
@@ -201,7 +201,7 @@ static int read_header(AVFormatContext *s,
     int found_data, ret;
     int64_t size;
 
-    url_fskip(pb, 8); /* magic, version, file flags */
+    avio_skip(pb, 8); /* magic, version, file flags */
 
     /* audio description chunk */
     if (avio_rb32(pb) != MKBETAG('d','e','s','c')) {
@@ -223,7 +223,7 @@ static int read_header(AVFormatContext *s,
 
         /* stop at data chunk if seeking is not supported or
            data chunk size is unknown */
-        if (found_data && (caf->data_size < 0 || url_is_streamed(pb)))
+        if (found_data && (caf->data_size < 0 || !pb->seekable))
             break;
 
         tag  = avio_rb32(pb);
@@ -233,11 +233,11 @@ static int read_header(AVFormatContext *s,
 
         switch (tag) {
         case MKBETAG('d','a','t','a'):
-            url_fskip(pb, 4); /* edit count */
-            caf->data_start = url_ftell(pb);
+            avio_skip(pb, 4); /* edit count */
+            caf->data_start = avio_tell(pb);
             caf->data_size  = size < 0 ? -1 : size - 4;
-            if (caf->data_size > 0 && !url_is_streamed(pb))
-                url_fskip(pb, caf->data_size);
+            if (caf->data_size > 0 && pb->seekable)
+                avio_skip(pb, caf->data_size);
             found_data = 1;
             break;
 
@@ -265,7 +265,7 @@ static int read_header(AVFormatContext *s,
         case MKBETAG('f','r','e','e'):
             if (size < 0)
                 return AVERROR_INVALIDDATA;
-            url_fskip(pb, size);
+            avio_skip(pb, size);
             break;
         }
     }
@@ -284,7 +284,7 @@ static int read_header(AVFormatContext *s,
                                 "block size or frame size are variable.\n");
         return AVERROR_INVALIDDATA;
     }
-    s->file_size = url_fsize(pb);
+    s->file_size = avio_size(pb);
     s->file_size = FFMAX(0, s->file_size);
 
     av_set_pts_info(st, 64, 1, st->codec->sample_rate);
@@ -292,7 +292,7 @@ static int read_header(AVFormatContext *s,
 
     /* position the stream at the start of data */
     if (caf->data_size >= 0)
-        url_fseek(pb, caf->data_start, SEEK_SET);
+        avio_seek(pb, caf->data_start, SEEK_SET);
 
     return 0;
 }
@@ -312,7 +312,7 @@ static int read_packet(AVFormatContext *s, AVPacket *pkt)
 
     /* don't read past end of data chunk */
     if (caf->data_size > 0) {
-        left = (caf->data_start + caf->data_size) - url_ftell(pb);
+        left = (caf->data_start + caf->data_size) - avio_tell(pb);
         if (left <= 0)
             return AVERROR(EIO);
     }
@@ -377,7 +377,7 @@ static int read_seek(AVFormatContext *s, int stream_index,
         return -1;
     }
 
-    url_fseek(s->pb, pos + caf->data_start, SEEK_SET);
+    avio_seek(s->pb, pos + caf->data_start, SEEK_SET);
     return 0;
 }
 

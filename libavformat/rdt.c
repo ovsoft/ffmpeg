@@ -161,20 +161,20 @@ rdt_load_mdpr (PayloadContext *rdt, AVStream *st, int rule_nr)
         num = avio_rb16(&pb);
         if (rule_nr < 0 || rule_nr >= num)
             return -1;
-        url_fskip(&pb, rule_nr * 2);
+        avio_skip(&pb, rule_nr * 2);
         chunk_nr = avio_rb16(&pb);
-        url_fskip(&pb, (num - 1 - rule_nr) * 2);
+        avio_skip(&pb, (num - 1 - rule_nr) * 2);
 
         /* read MDPR chunks */
         num = avio_rb16(&pb);
         if (chunk_nr >= num)
             return -1;
         while (chunk_nr--)
-            url_fskip(&pb, avio_rb32(&pb));
+            avio_skip(&pb, avio_rb32(&pb));
         size = avio_rb32(&pb);
     } else {
         size = rdt->mlti_data_size;
-        url_fseek(&pb, 0, SEEK_SET);
+        avio_seek(&pb, 0, SEEK_SET);
     }
     if (ff_rm_read_mdpr_codecdata(rdt->rmctx, &pb, st, rdt->rmst[st->index], size) < 0)
         return -1;
@@ -305,7 +305,7 @@ rdt_parse_packet (AVFormatContext *ctx, PayloadContext *rdt, AVStream *st,
         flags = (flags & RTP_FLAG_KEY) ? 2 : 0;
         res = ff_rm_parse_packet (rdt->rmctx, &pb, st, rdt->rmst[st->index], len, pkt,
                                   &seq, flags, *timestamp);
-        pos = url_ftell(&pb);
+        pos = avio_tell(&pb);
         if (res < 0)
             return res;
         if (res > 0) {

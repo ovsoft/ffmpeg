@@ -73,7 +73,7 @@ static int read_part_of_packet(AVFormatContext *s, int64_t *pts,
     int64_t pva_pts = AV_NOPTS_VALUE, startpos;
 
 recover:
-    startpos = url_ftell(pb);
+    startpos = avio_tell(pb);
 
     syncword = avio_rb16(pb);
     streamid = avio_r8(pb);
@@ -122,7 +122,7 @@ recover:
             if (pes_signal != 1) {
                 pva_log(s, AV_LOG_WARNING, "expected signaled PES packet, "
                                           "trying to recover\n");
-                url_fskip(pb, length - 9);
+                avio_skip(pb, length - 9);
                 if (!read_packet)
                     return AVERROR(EIO);
                 goto recover;
@@ -182,7 +182,7 @@ static int64_t pva_read_timestamp(struct AVFormatContext *s, int stream_index,
 
     while (*pos < pos_limit) {
         res = AV_NOPTS_VALUE;
-        url_fseek(pb, *pos, SEEK_SET);
+        avio_seek(pb, *pos, SEEK_SET);
 
         pvactx->continue_pes = 0;
         if (read_part_of_packet(s, &res, &length, &streamid, 0)) {
@@ -190,7 +190,7 @@ static int64_t pva_read_timestamp(struct AVFormatContext *s, int stream_index,
             continue;
         }
         if (streamid - 1 != stream_index || res == AV_NOPTS_VALUE) {
-            *pos = url_ftell(pb) + length;
+            *pos = avio_tell(pb) + length;
             continue;
         }
         break;

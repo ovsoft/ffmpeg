@@ -46,7 +46,7 @@ static int efi_read(AVFormatContext *avctx, uint64_t start_pos)
     char buf[37];
     int len;
 
-    url_fseek(pb, start_pos, SEEK_SET);
+    avio_seek(pb, start_pos, SEEK_SET);
     if (avio_r8(pb) != 0x1A)
         return -1;
 
@@ -88,14 +88,14 @@ static int read_header(AVFormatContext *avctx,
     /* simulate tty display speed */
     s->chars_per_frame = FFMAX(av_q2d(st->time_base) * (ap->sample_rate ? ap->sample_rate : LINE_RATE), 1);
 
-    if (!url_is_streamed(avctx->pb)) {
-        s->fsize = url_fsize(avctx->pb);
+    if (avctx->pb->seekable) {
+        s->fsize = avio_size(avctx->pb);
         st->duration = (s->fsize + s->chars_per_frame - 1) / s->chars_per_frame;
 
         if (ff_sauce_read(avctx, &s->fsize, 0, 0) < 0)
             efi_read(avctx, s->fsize - 51);
 
-        url_fseek(avctx->pb, 0, SEEK_SET);
+        avio_seek(avctx->pb, 0, SEEK_SET);
     }
 
     return 0;
@@ -112,7 +112,7 @@ static int read_packet(AVFormatContext *avctx, AVPacket *pkt)
     n = s->chars_per_frame;
     if (s->fsize) {
         // ignore metadata buffer
-        uint64_t p = url_ftell(avctx->pb);
+        uint64_t p = avio_tell(avctx->pb);
         if (p + s->chars_per_frame > s->fsize)
             n = s->fsize - p;
     }

@@ -31,6 +31,7 @@
 
 #include "libavutil/intreadwrite.h"
 #include "avformat.h"
+#include "avio_internal.h"
 #include "sox.h"
 
 typedef struct {
@@ -53,14 +54,14 @@ static int sox_write_header(AVFormatContext *s)
     sox->header_size = SOX_FIXED_HDR + comment_size;
 
     if (enc->codec_id == CODEC_ID_PCM_S32LE) {
-        put_tag(pb, ".SoX");
+        ffio_wfourcc(pb, ".SoX");
         avio_wl32(pb, sox->header_size);
         avio_wl64(pb, 0); /* number of samples */
         avio_wl64(pb, av_dbl2int(enc->sample_rate));
         avio_wl32(pb, enc->channels);
         avio_wl32(pb, comment_size);
     } else if (enc->codec_id == CODEC_ID_PCM_S32BE) {
-        put_tag(pb, "XoS.");
+        ffio_wfourcc(pb, "XoS.");
         avio_wb32(pb, sox->header_size);
         avio_wb64(pb, 0); /* number of samples */
         avio_wb64(pb, av_dbl2int(enc->sample_rate));
@@ -77,7 +78,7 @@ static int sox_write_header(AVFormatContext *s)
     for ( ; comment_size > comment_len; comment_len++)
         avio_w8(pb, 0);
 
-    put_flush_packet(pb);
+    avio_flush(pb);
 
     return 0;
 }
@@ -95,18 +96,18 @@ static int sox_write_trailer(AVFormatContext *s)
     AVIOContext *pb = s->pb;
     AVCodecContext *enc = s->streams[0]->codec;
 
-    if (!url_is_streamed(s->pb)) {
+    if (s->pb->seekable) {
         /* update number of samples */
-        int64_t file_size = url_ftell(pb);
+        int64_t file_size = avio_tell(pb);
         int64_t num_samples = (file_size - sox->header_size - 4LL) >> 2LL;
-        url_fseek(pb, 8, SEEK_SET);
+        avio_seek(pb, 8, SEEK_SET);
         if (enc->codec_id == CODEC_ID_PCM_S32LE) {
             avio_wl64(pb, num_samples);
         } else
             avio_wb64(pb, num_samples);
-        url_fseek(pb, file_size, SEEK_SET);
+        avio_seek(pb, file_size, SEEK_SET);
 
-        put_flush_packet(pb);
+        avio_flush(pb);
     }
 
     return 0;

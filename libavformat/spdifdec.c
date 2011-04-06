@@ -185,7 +185,7 @@ static int spdif_read_packet(AVFormatContext *s, AVPacket *pkt)
     if (ret)
         return ret;
 
-    pkt->pos = url_ftell(pb) - BURST_HEADER_SIZE;
+    pkt->pos = avio_tell(pb) - BURST_HEADER_SIZE;
 
     if (avio_read(pb, pkt->data, pkt->size) < pkt->size) {
         av_free_packet(pkt);
@@ -201,7 +201,7 @@ static int spdif_read_packet(AVFormatContext *s, AVPacket *pkt)
     }
 
     /* skip over the padding to the beginning of the next frame */
-    url_fskip(pb, offset - pkt->size - BURST_HEADER_SIZE);
+    avio_skip(pb, offset - pkt->size - BURST_HEADER_SIZE);
 
     if (!s->nb_streams) {
         /* first packet, create a stream */

@@ -28,6 +28,7 @@
 #include "libavcodec/bytestream.h"
 #include "libavcodec/mpeg4audio.h"
 #include "avformat.h"
+#include "avio_internal.h"
 #include "flv.h"
 
 typedef struct {
@@ -113,7 +114,7 @@ static int flv_set_video_codec(AVFormatContext *s, AVStream *vstream, int flv_co
 static int amf_get_string(AVIOContext *ioc, char *buffer, int buffsize) {
     int length = avio_rb16(ioc);
     if(length >= buffsize) {
-        url_fskip(ioc, length);
+        avio_skip(ioc, length);
         return -1;
     }
 
@@ -122,6 +123,59 @@ static int amf_get_string(AVIOContext *ioc, char *buffer, int buffsize) {
     buffer[length] = '\0';
 
     return length;
+}
+
+static int parse_keyframes_index(AVFormatContext *s, AVIOContext *ioc, AVStream *vstream, int64_t max_pos) {
+    unsigned int timeslen = 0, fileposlen = 0, i;
+    char str_val[256];
+    int64_t *times = NULL;
+    int64_t *filepositions = NULL;
+    int ret = 0;
+
+    while (avio_tell(ioc) < max_pos - 2 && amf_get_string(ioc, str_val, sizeof(str_val)) > 0) {
+        int64_t** current_array;
+        unsigned int arraylen;
+
+        // Expect array object in context
+        if (avio_r8(ioc) != AMF_DATA_TYPE_ARRAY)
+            break;
+
+        arraylen = avio_rb32(ioc);
+        if(arraylen>>28)
+            break;
+
+        if       (!strcmp(KEYFRAMES_TIMESTAMP_TAG , str_val) && !times){
+            current_array= &times;
+            timeslen= arraylen;
+        }else if (!strcmp(KEYFRAMES_BYTEOFFSET_TAG, str_val) && !filepositions){
+            current_array= &filepositions;
+            fileposlen= arraylen;
+        }else // unexpected metatag inside keyframes, will not use such metadata for indexing
+            break;
+
+        if (!(*current_array = av_mallocz(sizeof(**current_array) * arraylen))) {
+            ret = AVERROR(ENOMEM);
+            goto finish;
+        }
+
+        for (i = 0; i < arraylen && avio_tell(ioc) < max_pos - 1; i++) {
+            if (avio_r8(ioc) != AMF_DATA_TYPE_NUMBER)
+                goto finish;
+            current_array[0][i] = av_int2dbl(avio_rb64(ioc));
+        }
+    }
+
+    if (timeslen == fileposlen) {
+         for(i = 0; i < timeslen; i++)
+             av_add_index_entry(vstream, filepositions[i], times[i]*1000, 0, 0, AVINDEX_KEYFRAME);
+    } else
+        av_log(s, AV_LOG_WARNING, "Invalid keyframes object, skipping.\n");
+
+finish:
+    av_freep(&times);
+    av_freep(&filepositions);
+    avio_seek(ioc, max_pos, SEEK_SET);
+    return ret;
 }
 
 static int amf_parse_object(AVFormatContext *s, AVStream *astream, AVStream *vstream, const char *key, int64_t max_pos, int depth) {
@@ -148,8 +202,12 @@ static int amf_parse_object(AVFormatContext *s, AVStream *astream, AVStream *vst
         case AMF_DATA_TYPE_OBJECT: {
             unsigned int keylen;
 
-            while(url_ftell(ioc) < max_pos - 2 && (keylen = avio_rb16(ioc))) {
-                url_fskip(ioc, keylen); //skip key string
+            if (key && !strcmp(KEYFRAMES_TAG, key) && depth == 1)
+                if (parse_keyframes_index(s, ioc, vstream, max_pos) < 0)
+                    return -1;
+
+            while(avio_tell(ioc) < max_pos - 2 && (keylen = avio_rb16(ioc))) {
+                avio_skip(ioc, keylen); //skip key string
                 if(amf_parse_object(s, NULL, NULL, NULL, max_pos, depth + 1) < 0)
                     return -1; //if we couldn't skip, bomb out.
             }
@@ -162,8 +220,8 @@ static int amf_parse_object(AVFormatContext *s, AVStream *astream, AVStream *vst
         case AMF_DATA_TYPE_UNSUPPORTED:
             break; //these take up no additional space
         case AMF_DATA_TYPE_MIXEDARRAY:
-            url_fskip(ioc, 4); //skip 32-bit max array index
-            while(url_ftell(ioc) < max_pos - 2 && amf_get_string(ioc, str_val, sizeof(str_val)) > 0) {
+            avio_skip(ioc, 4); //skip 32-bit max array index
+            while(avio_tell(ioc) < max_pos - 2 && amf_get_string(ioc, str_val, sizeof(str_val)) > 0) {
                 //this is the only case in which we would want a nested parse to not skip over the object
                 if(amf_parse_object(s, astream, vstream, str_val, max_pos, depth + 1) < 0)
                     return -1;
@@ -175,14 +233,14 @@ static int amf_parse_object(AVFormatContext *s, AVStream *astream, AVStream *vst
             unsigned int arraylen, i;
 
             arraylen = avio_rb32(ioc);
-            for(i = 0; i < arraylen && url_ftell(ioc) < max_pos - 1; i++) {
+            for(i = 0; i < arraylen && avio_tell(ioc) < max_pos - 1; i++) {
                 if(amf_parse_object(s, NULL, NULL, NULL, max_pos, depth + 1) < 0)
                     return -1; //if we couldn't skip, bomb out.
             }
         }
             break;
         case AMF_DATA_TYPE_DATE:
-            url_fskip(ioc, 8 + 2); //timestamp (double) and UTC offset (int16)
+            avio_skip(ioc, 8 + 2); //timestamp (double) and UTC offset (int16)
             break;
         default: //unsupported type, we couldn't skip
             return -1;
@@ -254,7 +312,7 @@ static int flv_read_header(AVFormatContext *s,
 {
     int offset, flags;
 
-    url_fskip(s->pb, 4);
+    avio_skip(s->pb, 4);
     flags = avio_r8(s->pb);
     /* old flvtool cleared this field */
     /* FIXME: better fix needed */
@@ -277,8 +335,8 @@ static int flv_read_header(AVFormatContext *s,
     }
 
     offset = avio_rb32(s->pb);
-    url_fseek(s->pb, offset, SEEK_SET);
-    url_fskip(s->pb, 4);
+    avio_seek(s->pb, offset, SEEK_SET);
+    avio_skip(s->pb, 4);
 
     s->start_time = 0;
 
@@ -304,8 +362,8 @@ static int flv_read_packet(AVFormatContext *s, AVPacket *pkt)
     int64_t dts, pts = AV_NOPTS_VALUE;
     AVStream *st = NULL;
 
- for(;;url_fskip(s->pb, 4)){ /* pkt size is repeated at end. skip it */
-    pos = url_ftell(s->pb);
+ for(;;avio_skip(s->pb, 4)){ /* pkt size is repeated at end. skip it */
+    pos = avio_tell(s->pb);
     type = avio_r8(s->pb);
     size = avio_rb24(s->pb);
     dts = avio_rb24(s->pb);
@@ -313,13 +371,13 @@ static int flv_read_packet(AVFormatContext *s, AVPacket *pkt)
 //    av_log(s, AV_LOG_DEBUG, "type:%d, size:%d, dts:%d\n", type, size, dts);
     if (url_feof(s->pb))
         return AVERROR_EOF;
-    url_fskip(s->pb, 3); /* stream id, always 0 */
+    avio_skip(s->pb, 3); /* stream id, always 0 */
     flags = 0;
 
     if(size == 0)
         continue;
 
-    next= size + url_ftell(s->pb);
+    next= size + avio_tell(s->pb);
 
     if (type == FLV_TAG_TYPE_AUDIO) {
         is_audio=1;
@@ -337,7 +395,7 @@ static int flv_read_packet(AVFormatContext *s, AVPacket *pkt)
         else /* skip packet */
             av_log(s, AV_LOG_DEBUG, "skipping flv packet: type %d, size %d, flags %d\n", type, size, flags);
     skip:
-        url_fseek(s->pb, next, SEEK_SET);
+        avio_seek(s->pb, next, SEEK_SET);
         continue;
     }
 
@@ -361,7 +419,7 @@ static int flv_read_packet(AVFormatContext *s, AVPacket *pkt)
        ||(st->discard >= AVDISCARD_BIDIR  &&  ((flags & FLV_VIDEO_FRAMETYPE_MASK) == FLV_FRAME_DISP_INTER && !is_audio))
        || st->discard >= AVDISCARD_ALL
        ){
-        url_fseek(s->pb, next, SEEK_SET);
+        avio_seek(s->pb, next, SEEK_SET);
         continue;
     }
     if ((flags & FLV_VIDEO_FRAMETYPE_MASK) == FLV_FRAME_KEY)
@@ -370,19 +428,19 @@ static int flv_read_packet(AVFormatContext *s, AVPacket *pkt)
  }
 
     // if not streamed and no duration from metadata then seek to end to find the duration from the timestamps
-    if(!url_is_streamed(s->pb) && (!s->duration || s->duration==AV_NOPTS_VALUE)){
+    if(s->pb->seekable && (!s->duration || s->duration==AV_NOPTS_VALUE)){
         int size;
-        const int64_t pos= url_ftell(s->pb);
-        const int64_t fsize= url_fsize(s->pb);
-        url_fseek(s->pb, fsize-4, SEEK_SET);
+        const int64_t pos= avio_tell(s->pb);
+        const int64_t fsize= avio_size(s->pb);
+        avio_seek(s->pb, fsize-4, SEEK_SET);
         size= avio_rb32(s->pb);
-        url_fseek(s->pb, fsize-3-size, SEEK_SET);
+        avio_seek(s->pb, fsize-3-size, SEEK_SET);
         if(size == avio_rb24(s->pb) + 11){
             uint32_t ts = avio_rb24(s->pb);
             ts |= avio_r8(s->pb) << 24;
             s->duration = ts * (int64_t)AV_TIME_BASE / 1000;
         }
-        url_fseek(s->pb, pos, SEEK_SET);
+        avio_seek(s->pb, pos, SEEK_SET);
     }
 
     if(is_audio){
@@ -454,14 +512,14 @@ static int flv_read_packet(AVFormatContext *s, AVPacket *pkt)
         pkt->flags |= AV_PKT_FLAG_KEY;
 
 leave:
-    url_fskip(s->pb, 4);
+    avio_skip(s->pb, 4);
     return ret;
 }
 
 static int flv_read_seek(AVFormatContext *s, int stream_index,
     int64_t ts, int flags)
 {
-    return av_url_read_fseek(s->pb, stream_index, ts, flags);
+    return ffio_read_seek(s->pb, stream_index, ts, flags);
 }
 
 #if 0 /* don't know enough to implement this */
@@ -472,7 +530,7 @@ static int flv_read_seek2(AVFormatContext *s, int stream_index,
 
     if (ts - min_ts > (uint64_t)(max_ts - ts)) flags |= AVSEEK_FLAG_BACKWARD;
 
-    if (url_is_streamed(s->pb)) {
+    if (!s->pb->seekable) {
         if (stream_index < 0) {
             stream_index = av_find_default_stream_index(s);
             if (stream_index < 0)
@@ -482,7 +540,7 @@ static int flv_read_seek2(AVFormatContext *s, int stream_index,
             ts = av_rescale_rnd(ts, 1000, AV_TIME_BASE,
                 flags & AVSEEK_FLAG_BACKWARD ? AV_ROUND_DOWN : AV_ROUND_UP);
         }
-        ret = av_url_read_fseek(s->pb, stream_index, ts, flags);
+        ret = ffio_read_seek(s->pb, stream_index, ts, flags);
     }
 
     if (ret == AVERROR(ENOSYS))

@@ -40,24 +40,24 @@ static int amr_write_header(AVFormatContext *s)
 
     if (enc->codec_id == CODEC_ID_AMR_NB)
     {
-        put_tag(pb, AMR_header);       /* magic number */
+        avio_write(pb, AMR_header,   sizeof(AMR_header)   - 1); /* magic number */
     }
     else if(enc->codec_id == CODEC_ID_AMR_WB)
     {
-        put_tag(pb, AMRWB_header);       /* magic number */
+        avio_write(pb, AMRWB_header, sizeof(AMRWB_header) - 1); /* magic number */
     }
     else
     {
         return -1;
     }
-    put_flush_packet(pb);
+    avio_flush(pb);
     return 0;
 }
 
 static int amr_write_packet(AVFormatContext *s, AVPacket *pkt)
 {
     avio_write(s->pb, pkt->data, pkt->size);
-    put_flush_packet(s->pb);
+    avio_flush(s->pb);
     return 0;
 }
 #endif /* CONFIG_AMR_MUXER */
@@ -121,6 +121,7 @@ static int amr_read_packet(AVFormatContext *s,
 {
     AVCodecContext *enc = s->streams[0]->codec;
     int read, size = 0, toc, mode;
+    int64_t pos = avio_tell(s->pb);
 
     if (url_feof(s->pb))
     {
@@ -153,8 +154,11 @@ static int amr_read_packet(AVFormatContext *s,
         return AVERROR(EIO);
     }
 
+    /* Both AMR formats have 50 frames per second */
+    s->streams[0]->codec->bit_rate = size*8*50;
+
     pkt->stream_index = 0;
-    pkt->pos= url_ftell(s->pb);
+    pkt->pos = pos;
     pkt->data[0]=toc;
     pkt->duration= enc->codec_id == CODEC_ID_AMR_NB ? 160 : 320;
     read = avio_read(s->pb, pkt->data+1, size-1);
@@ -177,6 +181,7 @@ AVInputFormat ff_amr_demuxer = {
     amr_read_header,
     amr_read_packet,
     NULL,
+    .flags = AVFMT_GENERIC_INDEX,
 };
 #endif
 

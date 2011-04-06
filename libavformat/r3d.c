@@ -38,7 +38,7 @@ typedef struct {
 
 static int read_atom(AVFormatContext *s, Atom *atom)
 {
-    atom->offset = url_ftell(s->pb);
+    atom->offset = avio_tell(s->pb);
     atom->size = avio_rb32(s->pb);
     if (atom->size < 8)
         return -1;
@@ -72,7 +72,7 @@ static int r3d_read_red1(AVFormatContext *s)
     tmp = avio_rb32(s->pb); // filenum
     av_dlog(s, "filenum %d\n", tmp);
 
-    url_fskip(s->pb, 32); // unknown
+    avio_skip(s->pb, 32); // unknown
 
     st->codec->width  = avio_rb32(s->pb);
     st->codec->height = avio_rb32(s->pb);
@@ -152,7 +152,7 @@ static void r3d_read_reos(AVFormatContext *s)
     tmp = avio_rb32(s->pb);
     av_dlog(s, "num audio chunks %d\n", tmp);
 
-    url_fskip(s->pb, 6*4);
+    avio_skip(s->pb, 6*4);
 }
 
 static int r3d_read_header(AVFormatContext *s, AVFormatParameters *ap)
@@ -175,12 +175,12 @@ static int r3d_read_header(AVFormatContext *s, AVFormatParameters *ap)
         return -1;
     }
 
-    s->data_offset = url_ftell(s->pb);
+    s->data_offset = avio_tell(s->pb);
     av_dlog(s, "data offset %#llx\n", s->data_offset);
-    if (url_is_streamed(s->pb))
+    if (!s->pb->seekable)
         return 0;
     // find REOB/REOF/REOS to load index
-    url_fseek(s->pb, url_fsize(s->pb)-48-8, SEEK_SET);
+    avio_seek(s->pb, avio_size(s->pb)-48-8, SEEK_SET);
     if (read_atom(s, &atom) < 0)
         av_log(s, AV_LOG_ERROR, "error reading end atom\n");
 
@@ -192,7 +192,7 @@ static int r3d_read_header(AVFormatContext *s, AVFormatParameters *ap)
     r3d_read_reos(s);
 
     if (r3d->rdvo_offset) {
-        url_fseek(s->pb, r3d->rdvo_offset, SEEK_SET);
+        avio_seek(s->pb, r3d->rdvo_offset, SEEK_SET);
         if (read_atom(s, &atom) < 0)
             av_log(s, AV_LOG_ERROR, "error reading 'rdvo' atom\n");
         if (atom.tag == MKTAG('R','D','V','O')) {
@@ -202,7 +202,7 @@ static int r3d_read_header(AVFormatContext *s, AVFormatParameters *ap)
     }
 
  out:
-    url_fseek(s->pb, s->data_offset, SEEK_SET);
+    avio_seek(s->pb, s->data_offset, SEEK_SET);
     return 0;
 }
 
@@ -210,7 +210,7 @@ static int r3d_read_redv(AVFormatContext *s, AVPacket *pkt, Atom *atom)
 {
     AVStream *st = s->streams[0];
     int tmp, tmp2;
-    uint64_t pos = url_ftell(s->pb);
+    uint64_t pos = avio_tell(s->pb);
     unsigned dts;
     int ret;
 
@@ -241,7 +241,7 @@ static int r3d_read_redv(AVFormatContext *s, AVPacket *pkt, Atom *atom)
         tmp = avio_rb32(s->pb);
         av_dlog(s, "metadata len %d\n", tmp);
     }
-    tmp = atom->size - 8 - (url_ftell(s->pb) - pos);
+    tmp = atom->size - 8 - (avio_tell(s->pb) - pos);
     if (tmp < 0)
         return -1;
     ret = av_get_packet(s->pb, pkt, tmp);
@@ -264,7 +264,7 @@ static int r3d_read_reda(AVFormatContext *s, AVPacket *pkt, Atom *atom)
 {
     AVStream *st = s->streams[1];
     int tmp, tmp2, samples, size;
-    uint64_t pos = url_ftell(s->pb);
+    uint64_t pos = avio_tell(s->pb);
     unsigned dts;
     int ret;
 
@@ -287,7 +287,7 @@ static int r3d_read_reda(AVFormatContext *s, AVPacket *pkt, Atom *atom)
     tmp = avio_rb32(s->pb); // unknown
     av_dlog(s, "unknown %d\n", tmp);
 
-    size = atom->size - 8 - (url_ftell(s->pb) - pos);
+    size = atom->size - 8 - (avio_tell(s->pb) - pos);
     if (size < 0)
         return -1;
     ret = av_get_packet(s->pb, pkt, size);
@@ -332,7 +332,7 @@ static int r3d_read_packet(AVFormatContext *s, AVPacket *pkt)
             break;
         default:
         skip:
-            url_fskip(s->pb, atom.size-8);
+            avio_skip(s->pb, atom.size-8);
         }
     }
     return err;
@@ -359,7 +359,7 @@ static int r3d_seek(AVFormatContext *s, int stream_index, int64_t sample_time, i
     av_dlog(s, "seek frame num %d timestamp %lld\n", frame_num, sample_time);
 
     if (frame_num < r3d->video_offsets_count) {
-        url_fseek(s->pb, r3d->video_offsets_count, SEEK_SET);
+        avio_seek(s->pb, r3d->video_offsets_count, SEEK_SET);
     } else {
         av_log(s, AV_LOG_ERROR, "could not seek to frame %d\n", frame_num);
         return -1;

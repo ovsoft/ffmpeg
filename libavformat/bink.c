@@ -98,7 +98,7 @@ static int read_header(AVFormatContext *s, AVFormatParameters *ap)
         return AVERROR(EIO);
     }
 
-    url_fskip(pb, 4);
+    avio_skip(pb, 4);
 
     vst->codec->width  = avio_rl32(pb);
     vst->codec->height = avio_rl32(pb);
@@ -127,14 +127,14 @@ static int read_header(AVFormatContext *s, AVFormatParameters *ap)
     }
 
     if (bink->num_audio_tracks) {
-        url_fskip(pb, 4 * bink->num_audio_tracks);
+        avio_skip(pb, 4 * bink->num_audio_tracks);
 
         for (i = 0; i < bink->num_audio_tracks; i++) {
             ast = av_new_stream(s, 1);
             if (!ast)
                 return AVERROR(ENOMEM);
             ast->codec->codec_type  = AVMEDIA_TYPE_AUDIO;
-            ast->codec->codec_tag   = 0;
+            ast->codec->codec_tag   = vst->codec->codec_tag;
             ast->codec->sample_rate = avio_rl16(pb);
             av_set_pts_info(ast, 64, 1, ast->codec->sample_rate);
             flags = avio_rl16(pb);
@@ -143,7 +143,8 @@ static int read_header(AVFormatContext *s, AVFormatParameters *ap)
             ast->codec->channels = flags & BINK_AUD_STEREO ? 2 : 1;
         }
 
-        url_fskip(pb, 4 * bink->num_audio_tracks);
+        for (i = 0; i < bink->num_audio_tracks; i++)
+            s->streams[i + 1]->id = avio_rl32(pb);
     }
 
     /* frame index table */
@@ -168,7 +169,7 @@ static int read_header(AVFormatContext *s, AVFormatParameters *ap)
                            keyframe ? AVINDEX_KEYFRAME : 0);
     }
 
-    url_fskip(pb, 4);
+    avio_skip(pb, 4);
 
     bink->current_track = -1;
     return 0;
@@ -224,7 +225,7 @@ static int read_packet(AVFormatContext *s, AVPacket *pkt)
                     AV_RL32(pkt->data) / (2 * s->streams[bink->current_track]->codec->channels);
             return 0;
         } else {
-            url_fseek(pb, audio_size, SEEK_CUR);
+            avio_skip(pb, audio_size);
         }
     }
 
@@ -246,11 +247,11 @@ static int read_seek(AVFormatContext *s, int stream_index, int64_t timestamp, in
     BinkDemuxContext *bink = s->priv_data;
     AVStream *vst = s->streams[0];
 
-    if (url_is_streamed(s->pb))
+    if (!s->pb->seekable)
         return -1;
 
     /* seek to the first frame */
-    url_fseek(s->pb, vst->index_entries[0].pos, SEEK_SET);
+    avio_seek(s->pb, vst->index_entries[0].pos, SEEK_SET);
     bink->video_pts = 0;
     memset(bink->audio_pts, 0, sizeof(bink->audio_pts));
     bink->current_track = -1;

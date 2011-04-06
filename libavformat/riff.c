@@ -21,6 +21,7 @@
 
 #include "libavcodec/avcodec.h"
 #include "avformat.h"
+#include "avio_internal.h"
 #include "riff.h"
 #include "libavcodec/bytestream.h"
 
@@ -298,6 +299,7 @@ const AVCodecTag ff_codec_wav_tags[] = {
     { CODEC_ID_IMC,             0x0401 },
     { CODEC_ID_GSM_MS,          0x1500 },
     { CODEC_ID_TRUESPEECH,      0x1501 },
+    { CODEC_ID_AAC,             0x1600 }, /* ADTS AAC */
     { CODEC_ID_AAC_LATM,        0x1602 },
     { CODEC_ID_AC3,             0x2000 },
     { CODEC_ID_DTS,             0x2001 },
@@ -321,19 +323,19 @@ const AVCodecTag ff_codec_wav_tags[] = {
 #if CONFIG_MUXERS
 int64_t ff_start_tag(AVIOContext *pb, const char *tag)
 {
-    put_tag(pb, tag);
+    ffio_wfourcc(pb, tag);
     avio_wl32(pb, 0);
-    return url_ftell(pb);
+    return avio_tell(pb);
 }
 
 void ff_end_tag(AVIOContext *pb, int64_t start)
 {
     int64_t pos;
 
-    pos = url_ftell(pb);
-    url_fseek(pb, start - 4, SEEK_SET);
+    pos = avio_tell(pb);
+    avio_seek(pb, start - 4, SEEK_SET);
     avio_wl32(pb, (uint32_t)(pos - start));
-    url_fseek(pb, pos, SEEK_SET);
+    avio_seek(pb, pos, SEEK_SET);
 }
 
 /* WAVEFORMATEX header */
@@ -500,7 +502,7 @@ void ff_get_wav_header(AVIOContext *pb, AVCodecContext *codec, int size)
             codec->bits_per_coded_sample = avio_rl16(pb);
             codec->channel_layout = avio_rl32(pb); /* dwChannelMask */
             id = avio_rl32(pb); /* 4 first bytes of GUID */
-            url_fskip(pb, 12); /* skip end of GUID */
+            avio_skip(pb, 12); /* skip end of GUID */
             cbSize -= 22;
             size -= 22;
         }
@@ -513,7 +515,7 @@ void ff_get_wav_header(AVIOContext *pb, AVCodecContext *codec, int size)
 
         /* It is possible for the chunk to contain garbage at the end */
         if (size > 0)
-            url_fskip(pb, size);
+            avio_skip(pb, size);
     }
     codec->codec_id = ff_wav_codec_get_id(id, codec->bits_per_coded_sample);
     if (codec->codec_id == CODEC_ID_AAC_LATM) {

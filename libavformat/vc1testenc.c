@@ -62,7 +62,7 @@ static int vc1test_write_packet(AVFormatContext *s, AVPacket *pkt)
     avio_wl32(pb, pkt->size | ((pkt->flags & AV_PKT_FLAG_KEY) ? 0x80000000 : 0));
     avio_wl32(pb, pkt->pts);
     avio_write(pb, pkt->data, pkt->size);
-    put_flush_packet(pb);
+    avio_flush(pb);
     ctx->frames++;
 
     return 0;
@@ -73,10 +73,10 @@ static int vc1test_write_trailer(AVFormatContext *s)
     RCVContext *ctx = s->priv_data;
     AVIOContext *pb = s->pb;
 
-    if (!url_is_streamed(s->pb)) {
-        url_fseek(pb, 0, SEEK_SET);
+    if (s->pb->seekable) {
+        avio_seek(pb, 0, SEEK_SET);
         avio_wl24(pb, ctx->frames);
-        put_flush_packet(pb);
+        avio_flush(pb);
     }
     return 0;
 }

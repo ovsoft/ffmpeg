@@ -222,7 +222,7 @@ static int process_audio_header_eacs(AVFormatContext *s)
     ea->bytes        = avio_r8(pb);   /* 1=8-bit, 2=16-bit */
     ea->num_channels = avio_r8(pb);
     compression_type = avio_r8(pb);
-    url_fskip(pb, 13);
+    avio_skip(pb, 13);
 
     switch (compression_type) {
     case 0:
@@ -261,7 +261,7 @@ static int process_video_header_mdec(AVFormatContext *s)
 {
     EaDemuxContext *ea = s->priv_data;
     AVIOContext *pb = s->pb;
-    url_fskip(pb, 4);
+    avio_skip(pb, 4);
     ea->width  = avio_rl16(pb);
     ea->height = avio_rl16(pb);
     ea->time_base = (AVRational){1,15};
@@ -274,7 +274,7 @@ static int process_video_header_vp6(AVFormatContext *s)
     EaDemuxContext *ea = s->priv_data;
     AVIOContext *pb = s->pb;
 
-    url_fskip(pb, 16);
+    avio_skip(pb, 16);
     ea->time_base.den = avio_rl32(pb);
     ea->time_base.num = avio_rl32(pb);
     ea->video_codec = CODEC_ID_VP6;
@@ -293,7 +293,7 @@ static int process_ea_header(AVFormatContext *s) {
     int i;
 
     for (i=0; i<5 && (!ea->audio_codec || !ea->video_codec); i++) {
-        unsigned int startpos = url_ftell(pb);
+        unsigned int startpos = avio_tell(pb);
         int err = 0;
 
         blockid = avio_rl32(pb);
@@ -316,7 +316,7 @@ static int process_ea_header(AVFormatContext *s) {
             case SHEN_TAG :
                 blockid = avio_rl32(pb);
                 if (blockid == GSTR_TAG) {
-                    url_fskip(pb, 4);
+                    avio_skip(pb, 4);
                 } else if ((blockid & 0xFFFF)!=PT00_TAG) {
                     av_log (s, AV_LOG_ERROR, "unknown SCHl headerid\n");
                     return 0;
@@ -369,10 +369,10 @@ static int process_ea_header(AVFormatContext *s) {
             return err;
         }
 
-        url_fseek(pb, startpos + size, SEEK_SET);
+        avio_seek(pb, startpos + size, SEEK_SET);
     }
 
-    url_fseek(pb, 0, SEEK_SET);
+    avio_seek(pb, 0, SEEK_SET);
 
     return 1;
 }
@@ -474,19 +474,19 @@ static int ea_read_packet(AVFormatContext *s,
         /* audio data */
         case ISNh_TAG:
             /* header chunk also contains data; skip over the header portion*/
-            url_fskip(pb, 32);
+            avio_skip(pb, 32);
             chunk_size -= 32;
         case ISNd_TAG:
         case SCDl_TAG:
         case SNDC_TAG:
         case SDEN_TAG:
             if (!ea->audio_codec) {
-                url_fskip(pb, chunk_size);
+                avio_skip(pb, chunk_size);
                 break;
             } else if (ea->audio_codec == CODEC_ID_PCM_S16LE_PLANAR ||
                        ea->audio_codec == CODEC_ID_MP3) {
                 num_samples = avio_rl32(pb);
-                url_fskip(pb, 8);
+                avio_skip(pb, 8);
                 chunk_size -= 12;
             }
             ret = av_get_packet(pb, pkt, chunk_size);
@@ -536,12 +536,12 @@ static int ea_read_packet(AVFormatContext *s,
         case fVGT_TAG:
         case MADm_TAG:
         case MADe_TAG:
-            url_fseek(pb, -8, SEEK_CUR);     // include chunk preamble
+            avio_seek(pb, -8, SEEK_CUR);     // include chunk preamble
             chunk_size += 8;
             goto get_video_packet;
 
         case mTCD_TAG:
-            url_fseek(pb, 8, SEEK_CUR);  // skip ea dct header
+            avio_skip(pb, 8);  // skip ea dct header
             chunk_size -= 8;
             goto get_video_packet;
 
@@ -560,7 +560,7 @@ get_video_packet:
             break;
 
         default:
-            url_fseek(pb, chunk_size, SEEK_CUR);
+            avio_skip(pb, chunk_size);
             break;
         }
     }

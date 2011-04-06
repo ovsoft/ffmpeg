@@ -61,7 +61,7 @@ static int avs_read_header(AVFormatContext * s, AVFormatParameters * ap)
 
     s->ctx_flags |= AVFMTCTX_NOHEADER;
 
-    url_fskip(s->pb, 4);
+    avio_skip(s->pb, 4);
     avs->width = avio_rl16(s->pb);
     avs->height = avio_rl16(s->pb);
     avs->bits_per_sample = avio_rl16(s->pb);
@@ -123,9 +123,9 @@ static int avs_read_audio_packet(AVFormatContext * s, AVPacket * pkt)
     AvsFormat *avs = s->priv_data;
     int ret, size;
 
-    size = url_ftell(s->pb);
+    size = avio_tell(s->pb);
     ret = voc_get_packet(s, pkt, avs->st_audio, avs->remaining_audio_size);
-    size = url_ftell(s->pb) - size;
+    size = avio_tell(s->pb) - size;
     avs->remaining_audio_size -= size;
 
     if (ret == AVERROR(EIO))
@@ -204,7 +204,7 @@ static int avs_read_packet(AVFormatContext * s, AVPacket * pkt)
                 break;
 
             default:
-                url_fskip(s->pb, size - 4);
+                avio_skip(s->pb, size - 4);
             }
         }
     }

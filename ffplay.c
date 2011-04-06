@@ -208,8 +208,6 @@ typedef struct VideoState {
     char filename[1024];
     int width, height, xleft, ytop;
 
-    PtsCorrectionContext pts_ctx;
-
 #if CONFIG_AVFILTER
     AVFilterContext *out_video_filter;          ///<the last filter in the video chain
 #endif
@@ -1252,7 +1250,14 @@ retry:
             if (is->audio_st && is->video_st)
                 av_diff = get_audio_clock(is) - get_video_clock(is);
             printf("%7.2f A-V:%7.3f s:%3.1f aq=%5dKB vq=%5dKB sq=%5dB f=%"PRId64"/%"PRId64"   \r",
-                   get_master_clock(is), av_diff, FFMAX(is->skip_frames-1, 0), aqsize / 1024, vqsize / 1024, sqsize, is->pts_ctx.num_faulty_dts, is->pts_ctx.num_faulty_pts);
+                   get_master_clock(is),
+                   av_diff,
+                   FFMAX(is->skip_frames-1, 0),
+                   aqsize / 1024,
+                   vqsize / 1024,
+                   sqsize,
+                   is->video_st ? is->video_st->codec->pts_correction_num_faulty_dts : 0,
+                   is->video_st ? is->video_st->codec->pts_correction_num_faulty_pts : 0);
             fflush(stdout);
             last_time = cur_time;
         }
@@ -1527,7 +1532,6 @@ static int get_video_frame(VideoState *is, AVFrame *frame, int64_t *pts, AVPacke
         is->video_current_pos = -1;
         SDL_UnlockMutex(is->pictq_mutex);
 
-        init_pts_correction(&is->pts_ctx);
         is->frame_last_pts = AV_NOPTS_VALUE;
         is->frame_last_delay = 0;
         is->frame_timer = (double)av_gettime() / 1000000.0;
@@ -1542,7 +1546,7 @@ static int get_video_frame(VideoState *is, AVFrame *frame, int64_t *pts, AVPacke
 
     if (got_picture) {
         if (decoder_reorder_pts == -1) {
-            *pts = guess_correct_pts(&is->pts_ctx, frame->pkt_pts, frame->pkt_dts);
+            *pts = frame->best_effort_timestamp;
         } else if (decoder_reorder_pts) {
             *pts = frame->pkt_pts;
         } else {
@@ -2564,13 +2568,14 @@ static int decode_thread(void *arg)
                     goto fail;
                 }
             }
+            eof=0;
             continue;
         }
         ret = av_read_frame(ic, pkt);
         if (ret < 0) {
             if (ret == AVERROR_EOF || url_feof(ic->pb))
                 eof=1;
-            if (url_ferror(ic->pb))
+            if (ic->pb && ic->pb->error)
                 break;
             SDL_Delay(100); /* wait for user event */
             continue;
@@ -2805,7 +2810,7 @@ static void event_loop(void)
                         }else if(cur_stream->audio_stream >= 0 && cur_stream->audio_pkt.pos>=0){
                             pos= cur_stream->audio_pkt.pos;
                         }else
-                            pos = url_ftell(cur_stream->ic->pb);
+                            pos = avio_tell(cur_stream->ic->pb);
                         if (cur_stream->ic->bit_rate)
                             incr *= cur_stream->ic->bit_rate / 8.0;
                         else
@@ -2838,7 +2843,7 @@ static void event_loop(void)
             }
             if (cur_stream) {
                 if(seek_by_bytes || cur_stream->ic->duration<=0){
-                    uint64_t size=  url_fsize(cur_stream->ic->pb);
+                    uint64_t size=  avio_size(cur_stream->ic->pb);
                     stream_seek(cur_stream, size*x/cur_stream->width, 0, 1);
                 }else{
                     int64_t ts;
@@ -3019,6 +3024,7 @@ static const OptionDef options[] = {
 #endif
     { "rdftspeed", OPT_INT | HAS_ARG| OPT_AUDIO | OPT_EXPERT, {(void*)&rdftspeed}, "rdft speed", "msecs" },
     { "default", OPT_FUNC2 | HAS_ARG | OPT_AUDIO | OPT_VIDEO | OPT_EXPERT, {(void*)opt_default}, "generic catch all option", "" },
+    { "i", OPT_DUMMY, {NULL}, "ffmpeg compatibility dummy option", ""},
     { NULL, },
 };
 

@@ -73,7 +73,7 @@ next_chunk:
             if (chunk_size > 100)
                 break;
         case TXD_EXTRA:
-            url_fskip(s->pb, chunk_size);
+            avio_skip(s->pb, chunk_size);
         case TXD_FILE:
         case TXD_TEXTURE:
             goto next_chunk;

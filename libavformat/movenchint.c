@@ -23,6 +23,7 @@
 #include "libavutil/intreadwrite.h"
 #include "internal.h"
 #include "rtpenc_chain.h"
+#include "avio_internal.h"
 
 int ff_mov_init_hinting(AVFormatContext *s, int index, int src_index)
 {
@@ -316,7 +317,7 @@ static int write_hint_packets(AVIOContext *out, const uint8_t *data,
     int64_t count_pos, entries_pos;
     int count = 0, entries;
 
-    count_pos = url_ftell(out);
+    count_pos = avio_tell(out);
     /* RTPsample header */
     avio_wb16(out, 0); /* packet count */
     avio_wb16(out, 0); /* reserved */
@@ -358,7 +359,7 @@ static int write_hint_packets(AVIOContext *out, const uint8_t *data,
         avio_write(out, data, 2); /* RTP header */
         avio_wb16(out, seq); /* RTPsequenceseed */
         avio_wb16(out, 0); /* reserved + flags */
-        entries_pos = url_ftell(out);
+        entries_pos = avio_tell(out);
         avio_wb16(out, 0); /* entry count */
 
         data += 12;
@@ -371,16 +372,16 @@ static int write_hint_packets(AVIOContext *out, const uint8_t *data,
         data += packet_len;
         size -= packet_len;
 
-        curpos = url_ftell(out);
-        url_fseek(out, entries_pos, SEEK_SET);
+        curpos = avio_tell(out);
+        avio_seek(out, entries_pos, SEEK_SET);
         avio_wb16(out, entries);
-        url_fseek(out, curpos, SEEK_SET);
+        avio_seek(out, curpos, SEEK_SET);
     }
 
-    curpos = url_ftell(out);
-    url_fseek(out, count_pos, SEEK_SET);
+    curpos = avio_tell(out);
+    avio_seek(out, count_pos, SEEK_SET);
     avio_wb16(out, count);
-    url_fseek(out, curpos, SEEK_SET);
+    avio_seek(out, curpos, SEEK_SET);
     return count;
 }
 
@@ -408,8 +409,8 @@ int ff_mov_add_hinted_packet(AVFormatContext *s, AVPacket *pkt,
 
     /* Fetch the output from the RTP muxer, open a new output buffer
      * for next time. */
-    size = url_close_dyn_buf(rtp_ctx->pb, &buf);
-    if ((ret = url_open_dyn_packet_buf(&rtp_ctx->pb,
+    size = avio_close_dyn_buf(rtp_ctx->pb, &buf);
+    if ((ret = ffio_open_dyn_packet_buf(&rtp_ctx->pb,
                                        RTP_MAX_PACKET_SIZE)) < 0)
         goto done;
 
@@ -417,14 +418,14 @@ int ff_mov_add_hinted_packet(AVFormatContext *s, AVPacket *pkt,
         goto done;
 
     /* Open a buffer for writing the hint */
-    if ((ret = url_open_dyn_buf(&hintbuf)) < 0)
+    if ((ret = avio_open_dyn_buf(&hintbuf)) < 0)
         goto done;
     av_init_packet(&hint_pkt);
     count = write_hint_packets(hintbuf, buf, size, trk, &hint_pkt.dts);
     av_freep(&buf);
 
     /* Write the hint data into the hint track */
-    hint_pkt.size = size = url_close_dyn_buf(hintbuf, &buf);
+    hint_pkt.size = size = avio_close_dyn_buf(hintbuf, &buf);
     hint_pkt.data = buf;
     hint_pkt.pts  = hint_pkt.dts;
     hint_pkt.stream_index = track_index;
@@ -448,7 +449,7 @@ void ff_mov_close_hinting(MOVTrack *track) {
         return;
     if (rtp_ctx->pb) {
         av_write_trailer(rtp_ctx);
-        url_close_dyn_buf(rtp_ctx->pb, &ptr);
+        avio_close_dyn_buf(rtp_ctx->pb, &ptr);
         av_free(ptr);
     }
     avformat_free_context(rtp_ctx);

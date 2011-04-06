@@ -38,7 +38,7 @@ static int rso_write_header(AVFormatContext *s)
         return AVERROR_INVALIDDATA;
     }
 
-    if (url_is_streamed(s->pb)) {
+    if (!s->pb->seekable) {
         av_log(s, AV_LOG_ERROR, "muxer does not support non seekable output\n");
         return AVERROR_INVALIDDATA;
     }
@@ -60,7 +60,7 @@ static int rso_write_header(AVFormatContext *s)
     avio_wb16(pb, enc->sample_rate);
     avio_wb16(pb, 0x0000);           /* play mode ? (0x0000 = don't loop) */
 
-    put_flush_packet(pb);
+    avio_flush(pb);
 
     return 0;
 }
@@ -77,7 +77,7 @@ static int rso_write_trailer(AVFormatContext *s)
     int64_t file_size;
     uint16_t coded_file_size;
 
-    file_size = url_ftell(pb);
+    file_size = avio_tell(pb);
 
     if (file_size < 0)
         return file_size;
@@ -91,11 +91,11 @@ static int rso_write_trailer(AVFormatContext *s)
     }
 
     /* update file size */
-    url_fseek(pb, 2, SEEK_SET);
+    avio_seek(pb, 2, SEEK_SET);
     avio_wb16(pb, coded_file_size);
-    url_fseek(pb, file_size, SEEK_SET);
+    avio_seek(pb, file_size, SEEK_SET);
 
-    put_flush_packet(pb);
+    avio_flush(pb);
 
     return 0;
 }

@@ -28,6 +28,7 @@
 
 #define CONFIG_AC3ENC_FLOAT 1
 #include "ac3enc.c"
+#include "kbdwin.h"
 
 
 /**
@@ -68,23 +69,12 @@ static av_cold int mdct_init(AVCodecContext *avctx, AC3MDCTContext *mdct,
 
 
 /**
- * Calculate a 512-point MDCT
- * @param out 256 output frequency coefficients
- * @param in  512 windowed input audio samples
- */
-static void mdct512(AC3MDCTContext *mdct, float *out, float *in)
-{
-    ff_mdct_calc(&mdct->fft, out, in);
-}
-
-
-/**
  * Apply KBD window to input samples prior to MDCT.
  */
 static void apply_window(DSPContext *dsp, float *output, const float *input,
-                         const float *window, int n)
+                         const float *window, unsigned int len)
 {
-    dsp->vector_fmul(output, input, window, n);
+    dsp->vector_fmul(output, input, window, len);
 }
 
 
@@ -103,9 +93,8 @@ static int normalize_samples(AC3EncodeContext *s)
  */
 static void scale_coefficients(AC3EncodeContext *s)
 {
-    int i;
-    for (i = 0; i < AC3_MAX_COEFS * AC3_MAX_BLOCKS * s->channels; i++)
-        s->fixed_coef_buffer[i] = SCALE_FLOAT(s->mdct_coef_buffer[i], 24);
+    s->ac3dsp.float_to_fixed24(s->fixed_coef_buffer, s->mdct_coef_buffer,
+                               AC3_MAX_COEFS * AC3_MAX_BLOCKS * s->channels);
 }
 
 
@@ -120,5 +109,6 @@ AVCodec ff_ac3_encoder = {
     NULL,
     .sample_fmts = (const enum AVSampleFormat[]){AV_SAMPLE_FMT_FLT,AV_SAMPLE_FMT_NONE},
     .long_name = NULL_IF_CONFIG_SMALL("ATSC A/52A (AC-3)"),
+    .priv_class = &ac3enc_class,
     .channel_layouts = ac3_channel_layouts,
 };

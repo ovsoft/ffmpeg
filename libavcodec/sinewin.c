@@ -1,9 +1,4 @@
 /*
- * The simplest AC-3 encoder
- * Copyright (c) 2000 Fabrice Bellard
- * Copyright (c) 2006-2010 Justin Ruggles <justin.ruggles@gmail.com>
- * Copyright (c) 2006-2010 Prakash Punnoor <prakash@punnoor.de>
- *
  * This file is part of FFmpeg.
  *
  * FFmpeg is free software; you can redistribute it and/or
@@ -21,25 +16,5 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-/**
- * @file
- * floating-point AC-3 encoder header.
- */
-
-#ifndef AVCODEC_AC3ENC_FLOAT_H
-#define AVCODEC_AC3ENC_FLOAT_H
-
-#include "fft.h"
-
-
-typedef float SampleType;
-typedef float CoefType;
-typedef float CoefSumType;
-
-
-typedef struct AC3MDCTContext {
-    const float *window;    ///< MDCT window function
-    FFTContext fft;         ///< FFT context for MDCT calculation
-} AC3MDCTContext;
-
-#endif /* AVCODEC_AC3ENC_FLOAT_H */
+#include "sinewin.h"
+#include "sinewin_tablegen.h"

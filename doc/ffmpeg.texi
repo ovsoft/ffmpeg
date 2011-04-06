@@ -168,7 +168,10 @@ Set the number of video frames to record.
 @item -r @var{fps}
 Set frame rate (Hz value, fraction or abbreviation), (default = 25).
 @item -s @var{size}
-Set frame size. The format is @samp{wxh} (ffserver default = 160x128, ffmpeg default = same as source).
+Set frame size. The format is @samp{wxh} (ffserver default = 160x128).
+There is no default for input streams,
+for output streams it is set by default to the size of the source stream.
+If the input file has video streams with different resolutions, the behaviour is undefined.
 The following abbreviations are recognized:
 @table @samp
 @item sqcif
@@ -232,7 +235,13 @@ The following abbreviations are recognized:
 @end table
 
 @item -aspect @var{aspect}
-Set aspect ratio (4:3, 16:9 or 1.3333, 1.7777).
+Set the video display aspect ratio specified by @var{aspect}.
+
+@var{aspect} can be a floating point number string, or a string of the
+form @var{num}:@var{den}, where @var{num} and @var{den} are the
+numerator and denominator of the aspect ratio. For example "4:3",
+"16:9", "1.3333", and "1.7777" are valid argument values.
+
 @item -croptop @var{size}
 @item -cropbottom @var{size}
 @item -cropleft @var{size}
@@ -272,7 +281,7 @@ Set video buffer verifier buffer size (in bits).
 Force video codec to @var{codec}. Use the @code{copy} special value to
 tell that the raw codec data must be copied as is.
 @item -sameq
-Use same video quality as source (implies VBR).
+Use same quantizer as source (implies VBR).
 
 @item -pass @var{n}
 Select the pass number (1 or 2). It is used to do two-pass
@@ -586,6 +595,28 @@ Set the ISO 639 language code (3 letters) of the current audio stream.
 @table @option
 @item -atag @var{fourcc/tag}
 Force audio tag/fourcc.
+@item -audio_service_type @var{type}
+Set the type of service that the audio stream contains.
+@table @option
+@item ma
+Main Audio Service (default)
+@item ef
+Effects
+@item vi
+Visually Impaired
+@item hi
+Hearing Impaired
+@item di
+Dialogue
+@item co
+Commentary
+@item em
+Emergency
+@item vo
+Voice Over
+@item ka
+Karaoke
+@end table
 @item -absf @var{bitstream_filter}
 Bitstream filters available are "dump_extra", "remove_extra", "noise", "mp3comp", "mp3decomp".
 @end table
@@ -622,11 +653,43 @@ Synchronize read on input.
 @section Advanced options
 
 @table @option
-@item -map @var{input_stream_id}[:@var{sync_stream_id}]
-Set stream mapping from input streams to output streams.
-Just enumerate the input streams in the order you want them in the output.
-@var{sync_stream_id} if specified sets the input stream to sync
-against.
+@item -map @var{input_file_id}.@var{input_stream_id}[:@var{sync_file_id}.@var{sync_stream_id}]
+
+Designate an input stream as a source for the output file. Each input
+stream is identified by the input file index @var{input_file_id} and
+the input stream index @var{input_stream_id} within the input
+file. Both indexes start at 0. If specified,
+@var{sync_file_id}.@var{sync_stream_id} sets which input stream
+is used as a presentation sync reference.
+
+The @code{-map} options must be specified just after the output file.
+If any @code{-map} options are used, the number of @code{-map} options
+on the command line must match the number of streams in the output
+file. The first @code{-map} option on the command line specifies the
+source for output stream 0, the second @code{-map} option specifies
+the source for output stream 1, etc.
+
+For example, if you have two audio streams in the first input file,
+these streams are identified by "0.0" and "0.1". You can use
+@code{-map} to select which stream to place in an output file. For
+example:
+@example
+ffmpeg -i INPUT out.wav -map 0.1
+@end example
+will map the input stream in @file{INPUT} identified by "0.1" to
+the (single) output stream in @file{out.wav}.
+
+For example, to select the stream with index 2 from input file
+@file{a.mov} (specified by the identifier "0.2"), and stream with
+index 6 from input @file{b.mov} (specified by the identifier "1.6"),
+and copy them to the output file @file{out.mov}:
+@example
+ffmpeg -i a.mov -i b.mov -vcodec copy -acodec copy out.mov -map 0.2 -map 1.6
+@end example
+
+To add more streams to the output file, you can use the
+@code{-newaudio}, @code{-newvideo}, @code{-newsubtitle} options.
+
 @item -map_meta_data @var{outfile}[,@var{metadata}]:@var{infile}[,@var{metadata}]
 Deprecated, use @var{-map_metadata} instead.
 

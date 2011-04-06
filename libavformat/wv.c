@@ -84,7 +84,7 @@ static int wv_read_block_header(AVFormatContext *ctx, AVIOContext *pb, int appen
     int rate, bpp, chan;
     uint32_t chmask;
 
-    wc->pos = url_ftell(pb);
+    wc->pos = avio_tell(pb);
     if(!append){
         tag = avio_rl32(pb);
         if (tag != MKTAG('w', 'v', 'p', 'k'))
@@ -120,12 +120,12 @@ static int wv_read_block_header(AVFormatContext *ctx, AVIOContext *pb, int appen
         chmask = wc->chmask;
     }
     if((rate == -1 || !chan) && !wc->block_parsed){
-        int64_t block_end = url_ftell(pb) + wc->blksize - 24;
-        if(url_is_streamed(pb)){
+        int64_t block_end = avio_tell(pb) + wc->blksize - 24;
+        if(!pb->seekable){
             av_log(ctx, AV_LOG_ERROR, "Cannot determine additional parameters\n");
             return -1;
         }
-        while(url_ftell(pb) < block_end){
+        while(avio_tell(pb) < block_end){
             int id, size;
             id = avio_r8(pb);
             size = (id & 0x80) ? avio_rl24(pb) : avio_r8(pb);
@@ -153,7 +153,7 @@ static int wv_read_block_header(AVFormatContext *ctx, AVIOContext *pb, int appen
                     chmask = avio_rl32(pb);
                     break;
                 case 5:
-                    url_fskip(pb, 1);
+                    avio_skip(pb, 1);
                     chan |= (avio_r8(pb) & 0xF) << 8;
                     chmask = avio_rl24(pb);
                     break;
@@ -166,16 +166,16 @@ static int wv_read_block_header(AVFormatContext *ctx, AVIOContext *pb, int appen
                 rate = avio_rl24(pb);
                 break;
             default:
-                url_fskip(pb, size);
+                avio_skip(pb, size);
             }
             if(id&0x40)
-                url_fskip(pb, 1);
+                avio_skip(pb, 1);
         }
         if(rate == -1){
             av_log(ctx, AV_LOG_ERROR, "Cannot determine custom sampling rate\n");
             return -1;
         }
-        url_fseek(pb, block_end - wc->blksize + 24, SEEK_SET);
+        avio_seek(pb, block_end - wc->blksize + 24, SEEK_SET);
     }
     if(!wc->bpp) wc->bpp = bpp;
     if(!wc->chan) wc->chan = chan;
@@ -223,12 +223,12 @@ static int wv_read_header(AVFormatContext *s,
     st->start_time = 0;
     st->duration = wc->samples;
 
-    if(!url_is_streamed(s->pb)) {
-        int64_t cur = url_ftell(s->pb);
+    if(s->pb->seekable) {
+        int64_t cur = avio_tell(s->pb);
         ff_ape_parse_tag(s);
         if(!av_metadata_get(s->metadata, "", NULL, AV_METADATA_IGNORE_SUFFIX))
             ff_id3v1_read(s);
-        url_fseek(s->pb, cur, SEEK_SET);
+        avio_seek(s->pb, cur, SEEK_SET);
     }
 
     return 0;
@@ -320,18 +320,18 @@ static int wv_read_seek(AVFormatContext *s, int stream_index, int64_t timestamp,
     /* if found, seek there */
     if (index >= 0){
         wc->block_parsed = 1;
-        url_fseek(s->pb, st->index_entries[index].pos, SEEK_SET);
+        avio_seek(s->pb, st->index_entries[index].pos, SEEK_SET);
         return 0;
     }
     /* if timestamp is out of bounds, return error */
     if(timestamp < 0 || timestamp >= s->duration)
         return -1;
 
-    pos = url_ftell(s->pb);
+    pos = avio_tell(s->pb);
     do{
         ret = av_read_frame(s, pkt);
         if (ret < 0){
-            url_fseek(s->pb, pos, SEEK_SET);
+            avio_seek(s->pb, pos, SEEK_SET);
             return -1;
         }
         pts = pkt->pts;

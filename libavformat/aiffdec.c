@@ -70,7 +70,7 @@ static void get_meta(AVFormatContext *s, const char *key, int size)
     int res;
 
     if (!str) {
-        url_fskip(s->pb, size);
+        avio_skip(s->pb, size);
         return;
     }
 
@@ -152,7 +152,7 @@ static unsigned int get_aiff_header(AVIOContext *pb, AVCodecContext *codec,
 
     /* Chunk is over */
     if (size)
-        url_fseek(pb, size, SEEK_CUR);
+        avio_skip(pb, size);
 
     return num_frames;
 }
@@ -232,17 +232,17 @@ static int aiff_read_header(AVFormatContext *s,
             get_meta(s, "comment"  , size);
             break;
         case MKTAG('S', 'S', 'N', 'D'):     /* Sampled sound chunk */
-            aiff->data_end = url_ftell(pb) + size;
+            aiff->data_end = avio_tell(pb) + size;
             offset = avio_rb32(pb);      /* Offset of sound data */
             avio_rb32(pb);               /* BlockSize... don't care */
-            offset += url_ftell(pb);    /* Compute absolute data offset */
+            offset += avio_tell(pb);    /* Compute absolute data offset */
             if (st->codec->block_align)    /* Assume COMM already parsed */
                 goto got_sound;
-            if (url_is_streamed(pb)) {
+            if (!pb->seekable) {
                 av_log(s, AV_LOG_ERROR, "file is not seekable\n");
                 return -1;
             }
-            url_fskip(pb, size - 8);
+            avio_skip(pb, size - 8);
             break;
         case MKTAG('w', 'a', 'v', 'e'):
             if ((uint64_t)size > (1<<30))
@@ -256,7 +256,7 @@ static int aiff_read_header(AVFormatContext *s,
         default: /* Jump */
             if (size & 1)   /* Always even aligned */
                 size++;
-            url_fskip (pb, size);
+            avio_skip(pb, size);
         }
     }
 
@@ -276,7 +276,7 @@ got_sound:
         st->nb_frames * st->codec->frame_size : st->nb_frames;
 
     /* Position the stream at the first block */
-    url_fseek(pb, offset, SEEK_SET);
+    avio_seek(pb, offset, SEEK_SET);
 
     return 0;
 }
@@ -292,7 +292,7 @@ static int aiff_read_packet(AVFormatContext *s,
     int res, size;
 
     /* calculate size of remaining data */
-    max_size = aiff->data_end - url_ftell(s->pb);
+    max_size = aiff->data_end - avio_tell(s->pb);
     if (max_size <= 0)
         return AVERROR_EOF;
 

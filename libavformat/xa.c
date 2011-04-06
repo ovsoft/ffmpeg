@@ -76,9 +76,9 @@ static int xa_read_header(AVFormatContext *s,
 
     st->codec->codec_type   = AVMEDIA_TYPE_AUDIO;
     st->codec->codec_id     = CODEC_ID_ADPCM_EA_MAXIS_XA;
-    url_fskip(pb, 4);       /* Skip the XA ID */
+    avio_skip(pb, 4);       /* Skip the XA ID */
     xa->out_size            =  avio_rl32(pb);
-    url_fskip(pb, 2);       /* Skip the tag */
+    avio_skip(pb, 2);       /* Skip the tag */
     st->codec->channels     = avio_rl16(pb);
     st->codec->sample_rate  = avio_rl32(pb);
     /* Value in file is average byte rate*/

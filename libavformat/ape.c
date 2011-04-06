@@ -159,8 +159,8 @@ static int ape_read_header(AVFormatContext * s, AVFormatParameters * ap)
     int total_blocks;
     int64_t pts;
 
-    /* TODO: Skip any leading junk such as id3v2 tags */
-    ape->junklength = 0;
+    /* Skip any leading junk such as id3v2 tags */
+    ape->junklength = avio_tell(pb);
 
     tag = avio_rl32(pb);
     if (tag != MKTAG('M', 'A', 'C', ' '))
@@ -187,7 +187,7 @@ static int ape_read_header(AVFormatContext * s, AVFormatParameters * ap)
         /* Skip any unknown bytes at the end of the descriptor.
            This is for future compatibility */
         if (ape->descriptorlength > 52)
-            url_fseek(pb, ape->descriptorlength - 52, SEEK_CUR);
+            avio_skip(pb, ape->descriptorlength - 52);
 
         /* Read header data */
         ape->compressiontype      = avio_rl16(pb);
@@ -212,7 +212,7 @@ static int ape_read_header(AVFormatContext * s, AVFormatParameters * ap)
         ape->finalframeblocks     = avio_rl32(pb);
 
         if (ape->formatflags & MAC_FORMAT_FLAG_HAS_PEAK_LEVEL) {
-            url_fseek(pb, 4, SEEK_CUR); /* Skip the peak level */
+            avio_skip(pb, 4); /* Skip the peak level */
             ape->headerlength += 4;
         }
 
@@ -239,12 +239,21 @@ static int ape_read_header(AVFormatContext * s, AVFormatParameters * ap)
 
         /* Skip any stored wav header */
         if (!(ape->formatflags & MAC_FORMAT_FLAG_CREATE_WAV_HEADER))
-            url_fskip(pb, ape->wavheaderlength);
+            avio_skip(pb, ape->wavheaderlength);
     }
 
+    if(!ape->totalframes){
+        av_log(s, AV_LOG_ERROR, "No frames in the file!\n");
+        return AVERROR(EINVAL);
+    }
     if(ape->totalframes > UINT_MAX / sizeof(APEFrame)){
         av_log(s, AV_LOG_ERROR, "Too many frames: %d\n", ape->totalframes);
         return -1;
+    }
+    if (ape->seektablelength && (ape->seektablelength / sizeof(*ape->seektable)) < ape->totalframes) {
+        av_log(s, AV_LOG_ERROR, "Number of seek entries is less than number of frames: %d vs. %d\n",
+               ape->seektablelength / sizeof(*ape->seektable), ape->totalframes);
+        return AVERROR_INVALIDDATA;
     }
     ape->frames       = av_malloc(ape->totalframes * sizeof(APEFrame));
     if(!ape->frames)
@@ -267,7 +276,7 @@ static int ape_read_header(AVFormatContext * s, AVFormatParameters * ap)
     ape->frames[0].nblocks = ape->blocksperframe;
     ape->frames[0].skip    = 0;
     for (i = 1; i < ape->totalframes; i++) {
-        ape->frames[i].pos      = ape->seektable[i]; //ape->frames[i-1].pos + ape->blocksperframe;
+        ape->frames[i].pos      = ape->seektable[i] + ape->junklength; //ape->frames[i-1].pos + ape->blocksperframe;
         ape->frames[i].nblocks  = ape->blocksperframe;
         ape->frames[i - 1].size = ape->frames[i].pos - ape->frames[i - 1].pos;
         ape->frames[i].skip     = (ape->frames[i].pos - ape->frames[0].pos) & 3;
@@ -287,9 +296,9 @@ static int ape_read_header(AVFormatContext * s, AVFormatParameters * ap)
     ape_dumpinfo(s, ape);
 
     /* try to read APE tags */
-    if (!url_is_streamed(pb)) {
+    if (pb->seekable) {
         ff_ape_parse_tag(s);
-        url_fseek(pb, 0, SEEK_SET);
+        avio_seek(pb, 0, SEEK_SET);
     }
 
     av_log(s, AV_LOG_DEBUG, "Decoding file - v%d.%02d, compression level %d\n", ape->fileversion / 1000, (ape->fileversion % 1000) / 10, ape->compressiontype);
@@ -342,7 +351,7 @@ static int ape_read_packet(AVFormatContext * s, AVPacket * pkt)
     if (ape->currentframe > ape->totalframes)
         return AVERROR(EIO);
 
-    url_fseek (s->pb, ape->frames[ape->currentframe].pos, SEEK_SET);
+    avio_seek (s->pb, ape->frames[ape->currentframe].pos, SEEK_SET);
 
     /* Calculate how many blocks there are in this frame */
     if (ape->currentframe == (ape->totalframes - 1))

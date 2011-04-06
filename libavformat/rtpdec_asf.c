@@ -114,7 +114,7 @@ int ff_wms_parse_sdp_a_line(AVFormatContext *s, const char *p)
         if (ret < 0)
             return ret;
         av_metadata_copy(&s->metadata, rt->asf_ctx->metadata, 0);
-        rt->asf_pb_pos = url_ftell(&pb);
+        rt->asf_pb_pos = avio_tell(&pb);
         av_free(buf);
         rt->asf_ctx->pb = NULL;
     }
@@ -179,20 +179,20 @@ static int asfrtp_parse_packet(AVFormatContext *s, PayloadContext *asf,
 
         ffio_init_context(pb, buf, len, 0, NULL, NULL, NULL, NULL);
 
-        while (url_ftell(pb) + 4 < len) {
-            int start_off = url_ftell(pb);
+        while (avio_tell(pb) + 4 < len) {
+            int start_off = avio_tell(pb);
 
             mflags = avio_r8(pb);
             if (mflags & 0x80)
                 flags |= RTP_FLAG_KEY;
             len_off = avio_rb24(pb);
             if (mflags & 0x20)   /**< relative timestamp */
-                url_fskip(pb, 4);
+                avio_skip(pb, 4);
             if (mflags & 0x10)   /**< has duration */
-                url_fskip(pb, 4);
+                avio_skip(pb, 4);
             if (mflags & 0x8)    /**< has location ID */
-                url_fskip(pb, 4);
-            off = url_ftell(pb);
+                avio_skip(pb, 4);
+            off = avio_tell(pb);
 
             if (!(mflags & 0x40)) {
                 /**
@@ -201,23 +201,23 @@ static int asfrtp_parse_packet(AVFormatContext *s, PayloadContext *asf,
                  * ASF packet. This is used to spread one ASF packet over
                  * multiple RTP packets.
                  */
-                if (asf->pktbuf && len_off != url_ftell(asf->pktbuf)) {
+                if (asf->pktbuf && len_off != avio_tell(asf->pktbuf)) {
                     uint8_t *p;
-                    url_close_dyn_buf(asf->pktbuf, &p);
+                    avio_close_dyn_buf(asf->pktbuf, &p);
                     asf->pktbuf = NULL;
                     av_free(p);
                 }
                 if (!len_off && !asf->pktbuf &&
-                    (res = url_open_dyn_buf(&asf->pktbuf)) < 0)
+                    (res = avio_open_dyn_buf(&asf->pktbuf)) < 0)
                     return res;
                 if (!asf->pktbuf)
                     return AVERROR(EIO);
 
                 avio_write(asf->pktbuf, buf + off, len - off);
-                url_fskip(pb, len - off);
+                avio_skip(pb, len - off);
                 if (!(flags & RTP_FLAG_MARKER))
                     return -1;
-                out_len     = url_close_dyn_buf(asf->pktbuf, &asf->buf);
+                out_len     = avio_close_dyn_buf(asf->pktbuf, &asf->buf);
                 asf->pktbuf = NULL;
             } else {
                 /**
@@ -234,7 +234,7 @@ static int asfrtp_parse_packet(AVFormatContext *s, PayloadContext *asf,
                 asf->buf = av_realloc(asf->buf, out_len);
                 memcpy(asf->buf + prev_len, buf + off,
                        FFMIN(cur_len, len - off));
-                url_fskip(pb, cur_len);
+                avio_skip(pb, cur_len);
             }
         }
 
@@ -248,7 +248,7 @@ static int asfrtp_parse_packet(AVFormatContext *s, PayloadContext *asf,
         int i;
 
         res = av_read_packet(rt->asf_ctx, pkt);
-        rt->asf_pb_pos = url_ftell(pb);
+        rt->asf_pb_pos = avio_tell(pb);
         if (res != 0)
             break;
         for (i = 0; i < s->nb_streams; i++) {
@@ -272,7 +272,7 @@ static void asfrtp_free_context(PayloadContext *asf)
 {
     if (asf->pktbuf) {
         uint8_t *p = NULL;
-        url_close_dyn_buf(asf->pktbuf, &p);
+        avio_close_dyn_buf(asf->pktbuf, &p);
         asf->pktbuf = NULL;
         av_free(p);
     }

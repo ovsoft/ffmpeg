@@ -94,7 +94,8 @@ struct AVFormatContext;
  * filename     -- original name of the file.
  * genre        -- <self-evident>.
  * language     -- main language in which the work is performed, preferably
- *                 in ISO 639-2 format.
+ *                 in ISO 639-2 format. Multiple languages can be specified by
+ *                 separating them with commas.
  * performer    -- artist who performed the work, if different from artist.
  *                 E.g for "Also sprach Zarathustra", artist would be "Richard
  *                 Strauss" and performer "London Philharmonic Orchestra".
@@ -117,7 +118,7 @@ typedef struct {
 }AVMetadataTag;
 
 typedef struct AVMetadata AVMetadata;
-#if FF_API_OLD_METADATA
+#if FF_API_OLD_METADATA2
 typedef struct AVMetadataConv AVMetadataConv;
 #endif
 
@@ -158,7 +159,7 @@ attribute_deprecated int av_metadata_set(AVMetadata **pm, const char *key, const
  */
 int av_metadata_set2(AVMetadata **pm, const char *key, const char *value, int flags);
 
-#if FF_API_OLD_METADATA
+#if FF_API_OLD_METADATA2
 /**
  * This function is provided for compatibility reason and currently does nothing.
  */
@@ -296,7 +297,9 @@ typedef struct AVOutputFormat {
     int (*write_packet)(struct AVFormatContext *, AVPacket *pkt);
     int (*write_trailer)(struct AVFormatContext *);
     /**
-     * can use flags: AVFMT_NOFILE, AVFMT_NEEDNUMBER, AVFMT_GLOBALHEADER
+     * can use flags: AVFMT_NOFILE, AVFMT_NEEDNUMBER, AVFMT_RAWPICTURE,
+     * AVFMT_GLOBALHEADER, AVFMT_NOTIMESTAMPS, AVFMT_VARIABLE_FPS,
+     * AVFMT_NODIMENSIONS, AVFMT_NOSTREAMS
      */
     int flags;
     /**
@@ -635,6 +638,12 @@ typedef struct AVStream {
         double duration_error[MAX_STD_TIMEBASES];
         int64_t codec_info_duration;
     } *info;
+
+    /**
+     * flag to indicate that probing is requested
+     * NOT PART OF PUBLIC API
+     */
+    int request_probe;
 } AVStream;
 
 #define AV_PROGRAM_RUNNING 1
@@ -949,7 +958,7 @@ enum CodecID av_guess_codec(AVOutputFormat *fmt, const char *short_name,
  * @param buf buffer
  * @param size buffer size
  *
- * @see av_hex_dump_log, av_pkt_dump, av_pkt_dump_log
+ * @see av_hex_dump_log, av_pkt_dump2, av_pkt_dump_log2
  */
 void av_hex_dump(FILE *f, uint8_t *buf, int size);
 
@@ -963,7 +972,7 @@ void av_hex_dump(FILE *f, uint8_t *buf, int size);
  * @param buf buffer
  * @param size buffer size
  *
- * @see av_hex_dump, av_pkt_dump, av_pkt_dump_log
+ * @see av_hex_dump, av_pkt_dump2, av_pkt_dump_log2
  */
 void av_hex_dump_log(void *avcl, int level, uint8_t *buf, int size);
 
@@ -973,8 +982,11 @@ void av_hex_dump_log(void *avcl, int level, uint8_t *buf, int size);
  * @param f The file stream pointer where the dump should be sent to.
  * @param pkt packet to dump
  * @param dump_payload True if the payload must be displayed, too.
+ * @param st AVStream that the packet belongs to
  */
-void av_pkt_dump(FILE *f, AVPacket *pkt, int dump_payload);
+void av_pkt_dump2(FILE *f, AVPacket *pkt, int dump_payload, AVStream *st);
+
+attribute_deprecated void av_pkt_dump(FILE *f, AVPacket *pkt, int dump_payload);
 
 /**
  * Send a nice dump of a packet to the log.
@@ -985,8 +997,13 @@ void av_pkt_dump(FILE *f, AVPacket *pkt, int dump_payload);
  * higher importance.
  * @param pkt packet to dump
  * @param dump_payload True if the payload must be displayed, too.
+ * @param st AVStream that the packet belongs to
  */
-void av_pkt_dump_log(void *avcl, int level, AVPacket *pkt, int dump_payload);
+void av_pkt_dump_log2(void *avcl, int level, AVPacket *pkt, int dump_payload,
+                      AVStream *st);
+
+attribute_deprecated void av_pkt_dump_log(void *avcl, int level, AVPacket *pkt,
+                                          int dump_payload);
 
 /**
  * Initialize libavformat and register all the muxers, demuxers and
@@ -1044,6 +1061,15 @@ AVInputFormat *av_probe_input_format(AVProbeData *pd, int is_opened);
  *                  to retry with a larger probe buffer.
  */
 AVInputFormat *av_probe_input_format2(AVProbeData *pd, int is_opened, int *score_max);
+
+/**
+ * Guess the file format.
+ *
+ * @param is_opened Whether the file is already opened; determines whether
+ *                  demuxers with or without AVFMT_NOFILE are probed.
+ * @param score_ret The score of the best detection.
+ */
+AVInputFormat *av_probe_input_format3(AVProbeData *pd, int is_opened, int *score_ret);
 
 /**
  * Probe a bytestream to determine the input format. Each time a probe returns

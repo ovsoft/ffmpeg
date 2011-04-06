@@ -65,19 +65,19 @@ static int bfi_read_header(AVFormatContext * s, AVFormatParameters * ap)
         return AVERROR(ENOMEM);
 
     /* Set the total number of frames. */
-    url_fskip(pb, 8);
+    avio_skip(pb, 8);
     chunk_header           = avio_rl32(pb);
     bfi->nframes           = avio_rl32(pb);
     avio_rl32(pb);
     avio_rl32(pb);
     avio_rl32(pb);
     fps                    = avio_rl32(pb);
-    url_fskip(pb, 12);
+    avio_skip(pb, 12);
     vstream->codec->width  = avio_rl32(pb);
     vstream->codec->height = avio_rl32(pb);
 
     /*Load the palette to extradata */
-    url_fskip(pb, 8);
+    avio_skip(pb, 8);
     vstream->codec->extradata      = av_malloc(768);
     vstream->codec->extradata_size = 768;
     avio_read(pb, vstream->codec->extradata,
@@ -98,7 +98,7 @@ static int bfi_read_header(AVFormatContext * s, AVFormatParameters * ap)
     astream->codec->bits_per_coded_sample = 8;
     astream->codec->bit_rate        =
         astream->codec->sample_rate * astream->codec->bits_per_coded_sample;
-    url_fseek(pb, chunk_header - 3, SEEK_SET);
+    avio_seek(pb, chunk_header - 3, SEEK_SET);
     av_set_pts_info(astream, 64, 1, astream->codec->sample_rate);
     return 0;
 }

@@ -4,6 +4,11 @@ releases are sorted from youngest to oldest.
 
 version <next>:
 
+- many many things we forgot because we rather write code than changelogs
+- libmpcodecs video filter support (3 times as many filters than before)
+- mpeg2 aspect ratio dection fixed
+- libxvid aspect pickiness fixed
+- Frame multithreaded decoding
 - WebM support in Matroska de/muxer
 - low overhead Ogg muxing
 - MMS-TCP support
@@ -69,14 +74,21 @@ version <next>:
 - replace the ocv_smooth filter with a more generic ocv filter
 - Windows Televison (WTV) demuxer
 - FFmpeg metadata format muxer and demuxer
-- SubRip (srt) subtitle decoder
+- SubRip (srt) subtitle encoder and decoder
 - floating-point AC-3 encoder added
 - Lagarith decoder
 - ffmpeg -copytb option added
 - IVF muxer added
 - Wing Commander IV movies decoder added
 - movie source added
-- Bink version 'b' video decoder
+- Bink version 'b' audio and video decoder
+- Bitmap Brothers JV playback system
+- Apple HTTP Live Streaming protocol handler
+- sndio support for playback and record
+- Linux framebuffer input device added
+- Chronomaster DFA decoder
+- DPX image encoder
+- MicroDVD subtitle file muxer and demuxer
 
 
 version 0.6:

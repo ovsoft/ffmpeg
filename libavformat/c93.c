@@ -122,7 +122,7 @@ static int read_packet(AVFormatContext *s, AVPacket *pkt)
                     return AVERROR(ENOMEM);
                 c93->audio->codec->codec_type = AVMEDIA_TYPE_AUDIO;
             }
-            url_fskip(pb, 26); /* VOC header */
+            avio_skip(pb, 26); /* VOC header */
             ret = voc_get_packet(s, pkt, c93->audio, datasize - 26);
             if (ret > 0) {
                 pkt->stream_index = 1;
@@ -140,13 +140,13 @@ static int read_packet(AVFormatContext *s, AVPacket *pkt)
     }
 
     if (c93->current_frame == 0) {
-        url_fseek(pb, br->index * 2048, SEEK_SET);
+        avio_seek(pb, br->index * 2048, SEEK_SET);
         for (i = 0; i < 32; i++) {
             c93->frame_offsets[i] = avio_rl32(pb);
         }
     }
 
-    url_fseek(pb,br->index * 2048 +
+    avio_seek(pb,br->index * 2048 +
             c93->frame_offsets[c93->current_frame], SEEK_SET);
     datasize = avio_rl16(pb); /* video frame size */
 

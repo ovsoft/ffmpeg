@@ -37,10 +37,13 @@ typedef struct {
     AVRational        pixel_aspect;
 } BufferSourceContext;
 
-int av_vsrc_buffer_add_frame(AVFilterContext *buffer_filter, AVFrame *frame,
-                             int64_t pts, AVRational pixel_aspect)
+int av_vsrc_buffer_add_frame2(AVFilterContext *buffer_filter, AVFrame *frame,
+                              int64_t pts, AVRational pixel_aspect, int width,
+                              int height, enum PixelFormat  pix_fmt,
+                              const char *sws_param)
 {
     BufferSourceContext *c = buffer_filter->priv;
+    int ret;
 
     if (c->has_frame) {
         av_log(buffer_filter, AV_LOG_ERROR,
@@ -48,6 +51,42 @@ int av_vsrc_buffer_add_frame(AVFilterContext *buffer_filter, AVFrame *frame,
                "Please consume all available frames before adding a new one.\n"
             );
         //return -1;
+    }
+
+    if(width != c->w || height != c->h || pix_fmt != c->pix_fmt){
+        AVFilterContext *scale= buffer_filter->outputs[0]->dst;
+        AVFilterLink *link;
+
+        av_log(buffer_filter, AV_LOG_INFO, "Changing filter graph input to accept %dx%d %d (%d %d)\n",
+               width,height,pix_fmt, c->pix_fmt, scale->outputs[0]->format);
+
+        if(!scale || strcmp(scale->filter->name,"scale")){
+            AVFilter *f= avfilter_get_by_name("scale");
+
+            av_log(buffer_filter, AV_LOG_INFO, "Inserting scaler filter\n");
+            if(avfilter_open(&scale, f, "Input equalizer") < 0)
+                return -1;
+
+            if((ret=avfilter_init_filter(scale, sws_param, NULL))<0){
+                avfilter_free(scale);
+                return ret;
+            }
+
+            if((ret=avfilter_insert_filter(buffer_filter->outputs[0], scale, 0, 0))<0){
+                avfilter_free(scale);
+                return ret;
+            }
+
+            scale->outputs[0]->format= c->pix_fmt;
+        }
+
+        c->pix_fmt= scale->inputs[0]->format= pix_fmt;
+        c->w= scale->inputs[0]->w= width;
+        c->h= scale->inputs[0]->h= height;
+
+        link= scale->outputs[0];
+        if ((ret =  link->srcpad->config_props(link)) < 0)
+            return ret;
     }
 
     memcpy(c->frame.data    , frame->data    , sizeof(frame->data));
@@ -61,6 +100,16 @@ int av_vsrc_buffer_add_frame(AVFilterContext *buffer_filter, AVFrame *frame,
     return 0;
 }
 
+int av_vsrc_buffer_add_frame(AVFilterContext *buffer_filter, AVFrame *frame,
+                             int64_t pts, AVRational pixel_aspect)
+{
+    BufferSourceContext *c = buffer_filter->priv;
+
+    return av_vsrc_buffer_add_frame2(buffer_filter, frame,
+                              pts, pixel_aspect, c->w,
+                              c->h, c->pix_fmt, "");
+}
+
 static av_cold int init(AVFilterContext *ctx, const char *args, void *opaque)
 {
     BufferSourceContext *c = ctx->priv;
@@ -68,8 +117,10 @@ static av_cold int init(AVFilterContext *ctx, const char *args, void *opaque)
     int n = 0;
 
     if (!args ||
-        (n = sscanf(args, "%d:%d:%127[^:]:%d:%d", &c->w, &c->h, pix_fmt_str, &c->time_base.num, &c->time_base.den)) != 5) {
-        av_log(ctx, AV_LOG_ERROR, "Expected 5 arguments, but only %d found in '%s'\n", n, args);
+        (n = sscanf(args, "%d:%d:%127[^:]:%d:%d:%d:%d", &c->w, &c->h, pix_fmt_str,
+                    &c->time_base.num, &c->time_base.den,
+                    &c->pixel_aspect.num, &c->pixel_aspect.den)) != 7) {
+        av_log(ctx, AV_LOG_ERROR, "Expected 7 arguments, but only %d found in '%s'\n", n, args);
         return AVERROR(EINVAL);
     }
     if ((c->pix_fmt = av_get_pix_fmt(pix_fmt_str)) == PIX_FMT_NONE) {
@@ -100,6 +151,7 @@ static int config_props(AVFilterLink *link)
 
     link->w = c->w;
     link->h = c->h;
+    link->sample_aspect_ratio = c->pixel_aspect;
     link->time_base = c->time_base;
 
     return 0;

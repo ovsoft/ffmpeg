@@ -859,10 +859,11 @@ int vc1_parse_frame_header_adv(VC1Context *v, GetBitContext* gb)
             v->rptfrm = get_bits(gb, 2);
         } else {
             v->tff = get_bits1(gb);
-            v->rptfrm = get_bits1(gb);
+            v->rff = get_bits1(gb);
         }
     }
     if(v->panscanflag) {
+        av_log_missing_feature(v->s.avctx, "Pan-scan", 0);
         //...
     }
     v->rnd = get_bits1(gb);

@@ -25,6 +25,7 @@
 #include "libavcodec/bytestream.h"
 #include "libavcodec/flac.h"
 #include "avformat.h"
+#include "avio_internal.h"
 #include "internal.h"
 #include "vorbiscomment.h"
 
@@ -66,11 +67,11 @@ typedef struct {
 
 static void ogg_update_checksum(AVFormatContext *s, AVIOContext *pb, int64_t crc_offset)
 {
-    int64_t pos = url_ftell(pb);
-    uint32_t checksum = get_checksum(pb);
-    url_fseek(pb, crc_offset, SEEK_SET);
+    int64_t pos = avio_tell(pb);
+    uint32_t checksum = ffio_get_checksum(pb);
+    avio_seek(pb, crc_offset, SEEK_SET);
     avio_wb32(pb, checksum);
-    url_fseek(pb, pos, SEEK_SET);
+    avio_seek(pb, pos, SEEK_SET);
 }
 
 static int ogg_write_page(AVFormatContext *s, OGGPage *page, int extra_flags)
@@ -81,31 +82,31 @@ static int ogg_write_page(AVFormatContext *s, OGGPage *page, int extra_flags)
     int ret, size;
     uint8_t *buf;
 
-    ret = url_open_dyn_buf(&pb);
+    ret = avio_open_dyn_buf(&pb);
     if (ret < 0)
         return ret;
-    init_checksum(pb, ff_crc04C11DB7_update, 0);
-    put_tag(pb, "OggS");
+    ffio_init_checksum(pb, ff_crc04C11DB7_update, 0);
+    ffio_wfourcc(pb, "OggS");
     avio_w8(pb, 0);
     avio_w8(pb, page->flags | extra_flags);
     avio_wl64(pb, page->granule);
     avio_wl32(pb, oggstream->serial_num);
     avio_wl32(pb, oggstream->page_counter++);
-    crc_offset = url_ftell(pb);
+    crc_offset = avio_tell(pb);
     avio_wl32(pb, 0); // crc
     avio_w8(pb, page->segments_count);
     avio_write(pb, page->segments, page->segments_count);
     avio_write(pb, page->data, page->size);
 
     ogg_update_checksum(s, pb, crc_offset);
-    put_flush_packet(pb);
+    avio_flush(pb);
 
-    size = url_close_dyn_buf(pb, &buf);
+    size = avio_close_dyn_buf(pb, &buf);
     if (size < 0)
         return size;
 
     avio_write(s->pb, buf, size);
-    put_flush_packet(s->pb);
+    avio_flush(s->pb);
     av_free(buf);
     oggstream->page_count--;
     return 0;

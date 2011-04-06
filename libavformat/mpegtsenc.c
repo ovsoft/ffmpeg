@@ -283,12 +283,24 @@ static void mpegts_write_pmt(AVFormatContext *s, MpegTSService *service)
         /* write optional descriptors here */
         switch(st->codec->codec_type) {
         case AVMEDIA_TYPE_AUDIO:
-            if (lang && strlen(lang->value) == 3) {
+            if (lang) {
+                char *p;
+                char *next = lang->value;
+                uint8_t *len_ptr;
+
                 *q++ = 0x0a; /* ISO 639 language descriptor */
-                *q++ = 4;
-                *q++ = lang->value[0];
-                *q++ = lang->value[1];
-                *q++ = lang->value[2];
+                len_ptr = q++;
+                *len_ptr = 0;
+
+                for (p = lang->value; next && *len_ptr < 255 / 4 * 4; p = next + 1) {
+                    next = strchr(p, ',');
+                    if (strlen(p) != 3 && (!next || next != p + 3))
+                        continue; /* not a 3-letter code */
+
+                    *q++ = *p++;
+                    *q++ = *p++;
+                    *q++ = *p++;
+
                 if (st->disposition & AV_DISPOSITION_CLEAN_EFFECTS)
                     *q++ = 0x01;
                 else if (st->disposition & AV_DISPOSITION_HEARING_IMPAIRED)
@@ -297,6 +309,12 @@ static void mpegts_write_pmt(AVFormatContext *s, MpegTSService *service)
                     *q++ = 0x03;
                 else
                     *q++ = 0; /* undefined type */
+
+                    *len_ptr += 4;
+                }
+
+                if (*len_ptr == 0)
+                    q -= 2; /* no language codes were written */
             }
             break;
         case AVMEDIA_TYPE_SUBTITLE:
@@ -561,7 +579,7 @@ static int mpegts_write_header(AVFormatContext *s)
            service->pcr_packet_period,
            ts->sdt_packet_period, ts->pat_packet_period);
 
-    put_flush_packet(s->pb);
+    avio_flush(s->pb);
 
     return 0;
 
@@ -595,7 +613,7 @@ static void retransmit_si_info(AVFormatContext *s)
 
 static int64_t get_pcr(const MpegTSWrite *ts, AVIOContext *pb)
 {
-    return av_rescale(url_ftell(pb) + 11, 8 * PCR_TIME_BASE, ts->mux_rate) +
+    return av_rescale(avio_tell(pb) + 11, 8 * PCR_TIME_BASE, ts->mux_rate) +
            ts->first_pcr;
 }
 
@@ -847,7 +865,7 @@ static void mpegts_write_pes(AVFormatContext *s, AVStream *st,
         payload_size -= len;
         avio_write(s->pb, buf, TS_PACKET_SIZE);
     }
-    put_flush_packet(s->pb);
+    avio_flush(s->pb);
 }
 
 static int mpegts_write_packet(AVFormatContext *s, AVPacket *pkt)
@@ -970,7 +988,7 @@ static int mpegts_write_end(AVFormatContext *s)
         }
         av_freep(&ts_st->adts);
     }
-    put_flush_packet(s->pb);
+    avio_flush(s->pb);
 
     for(i = 0; i < ts->nb_services; i++) {
         service = ts->services[i];

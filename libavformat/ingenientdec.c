@@ -35,11 +35,11 @@ static int ingenient_read_packet(AVFormatContext *s, AVPacket *pkt)
     w = avio_rl16(s->pb);
     h = avio_rl16(s->pb);
 
-    url_fskip(s->pb, 8); // zero + size (padded?)
-    url_fskip(s->pb, 2);
+    avio_skip(s->pb, 8); // zero + size (padded?)
+    avio_skip(s->pb, 2);
     unk1 = avio_rl16(s->pb);
     unk2 = avio_rl16(s->pb);
-    url_fskip(s->pb, 22); // ASCII timestamp
+    avio_skip(s->pb, 22); // ASCII timestamp
 
     av_log(s, AV_LOG_DEBUG, "Ingenient packet: size=%d, width=%d, height=%d, unk1=%d unk2=%d\n",
         size, w, h, unk1, unk2);
@@ -47,7 +47,7 @@ static int ingenient_read_packet(AVFormatContext *s, AVPacket *pkt)
     if (av_new_packet(pkt, size) < 0)
         return AVERROR(ENOMEM);
 
-    pkt->pos = url_ftell(s->pb);
+    pkt->pos = avio_tell(s->pb);
     pkt->stream_index = 0;
     ret = avio_read(s->pb, pkt->data, size);
     if (ret < 0) {

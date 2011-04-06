@@ -98,9 +98,8 @@ ffplay.o: CFLAGS += $(SDL_CFLAGS)
 
 VERSION_SH  = $(SRC_PATH_BARE)/version.sh
 GIT_LOG     = $(SRC_PATH_BARE)/.git/logs/HEAD
-SVN_ENTRIES = $(SRC_PATH_BARE)/.svn/entries
 
-.version: $(wildcard $(GIT_LOG) $(SVN_ENTRIES)) $(VERSION_SH) config.mak
+.version: $(wildcard $(GIT_LOG)) $(VERSION_SH) config.mak
 .version: M=@
 
 version.h .version:
@@ -291,7 +290,7 @@ fate: $(FATE)
 
 $(FATE): ffmpeg$(EXESUF) $(FATE_UTILS:%=tests/%$(HOSTEXESUF))
 	@echo "TEST    $(@:fate-%=%)"
-	$(Q)$(SRC_PATH)/tests/fate-run.sh $@ "$(SAMPLES)" "$(TARGET_EXEC)" "$(TARGET_PATH)" '$(CMD)' '$(CMP)' '$(REF)' '$(FUZZ)'
+	$(Q)$(SRC_PATH)/tests/fate-run.sh $@ "$(SAMPLES)" "$(TARGET_EXEC)" "$(TARGET_PATH)" '$(CMD)' '$(CMP)' '$(REF)' '$(FUZZ)' '$(THREADS)'
 
 fate-list:
 	@printf '%s\n' $(sort $(FATE))

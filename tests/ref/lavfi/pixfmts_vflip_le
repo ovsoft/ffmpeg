@@ -1,6 +1,8 @@
 abgr                25e72e9dbd01ab00727c976d577f7be5
 argb                19869bf1a5ac0b6af4d8bbe2c104533c
 bgr24               89108a4ba00201f79b75b9305c42352d
+bgr48be             ed82382da09b64a8e04728fcf76e6814
+bgr48le             0f1f135608c2ff24d26d03e939fc2112
 bgr4_byte           407fcf564ed764c38e1d748f700ab921
 bgr555le            bd7b3ec4d684dfad075d89a606cb8b74
 bgr565le            fdb617533e1e7ff512ea5b6b6233e738
@@ -37,6 +39,6 @@ yuv444p16le         8f31557bc52adfe00ae8b40a9b8c23f8
 yuva420p            c705d1cf061d8c6580ac690b55f92276
 yuvj420p            41fd02b204da0ab62452cd14b595e2e4
 yuvj422p            7f6ca9bc1812cde02036d7d29a7cce43
-yuvj440p            40591908cca457f51dee30a86c3e8ffd
-yuvj444p            77e5e095881c52a04fd9f5abd1d7b5ac
+yuvj440p            25711c3c0fd15ec19c59a10784fcfb96
+yuvj444p            e45dee2ac02276dfab92e8ebfbe52e00
 yuyv422             e944ff7316cd03c42c091717ce74f602

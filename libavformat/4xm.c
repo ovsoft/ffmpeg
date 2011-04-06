@@ -106,7 +106,7 @@ static int fourxm_read_header(AVFormatContext *s,
     fourxm->fps = 1.0;
 
     /* skip the first 3 32-bit numbers */
-    url_fseek(pb, 12, SEEK_CUR);
+    avio_skip(pb, 12);
 
     /* check for LIST-HEAD */
     GET_LIST_HEADER();
@@ -283,7 +283,7 @@ static int fourxm_read_packet(AVFormatContext *s,
                 return AVERROR(EIO);
             pkt->stream_index = fourxm->video_stream_index;
             pkt->pts = fourxm->video_pts;
-            pkt->pos = url_ftell(s->pb);
+            pkt->pos = avio_tell(s->pb);
             memcpy(pkt->data, header, 8);
             ret = avio_read(s->pb, &pkt->data[8], size);
 
@@ -322,12 +322,12 @@ static int fourxm_read_packet(AVFormatContext *s,
                 fourxm->tracks[track_number].audio_pts += audio_frame_count;
 
             } else {
-                url_fseek(pb, size, SEEK_CUR);
+                avio_skip(pb, size);
             }
             break;
 
         default:
-            url_fseek(pb, size, SEEK_CUR);
+            avio_skip(pb, size);
             break;
         }
     }

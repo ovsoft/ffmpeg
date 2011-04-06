@@ -72,7 +72,7 @@ static int vqf_read_header(AVFormatContext *s, AVFormatParameters *ap)
     if (!st)
         return AVERROR(ENOMEM);
 
-    url_fskip(s->pb, 12);
+    avio_skip(s->pb, 12);
 
     header_size = avio_rb32(s->pb);
 
@@ -101,7 +101,7 @@ static int vqf_read_header(AVFormatContext *s, AVFormatParameters *ap)
             st->codec->channels = avio_rb32(s->pb) + 1;
             read_bitrate        = avio_rb32(s->pb);
             rate_flag           = avio_rb32(s->pb);
-            url_fskip(s->pb, len-12);
+            avio_skip(s->pb, len-12);
 
             st->codec->bit_rate              = read_bitrate*1000;
             st->codec->bits_per_coded_sample = 16;
@@ -140,7 +140,7 @@ static int vqf_read_header(AVFormatContext *s, AVFormatParameters *ap)
             av_log(s, AV_LOG_ERROR, "Unknown chunk: %c%c%c%c\n",
                    ((char*)&chunk_tag)[0], ((char*)&chunk_tag)[1],
                    ((char*)&chunk_tag)[2], ((char*)&chunk_tag)[3]);
-            url_fskip(s->pb, FFMIN(len, header_size));
+            avio_skip(s->pb, FFMIN(len, header_size));
             break;
         }
 
@@ -200,7 +200,7 @@ static int vqf_read_packet(AVFormatContext *s, AVPacket *pkt)
     int ret;
     int size = (c->frame_bit_len - c->remaining_bits + 7)>>3;
 
-    pkt->pos          = url_ftell(s->pb);
+    pkt->pos          = avio_tell(s->pb);
     pkt->stream_index = 0;
 
     if (av_new_packet(pkt, size+2) < 0)
@@ -240,7 +240,7 @@ static int vqf_read_seek(AVFormatContext *s,
     st->cur_dts = av_rescale(pos, st->time_base.den,
                              st->codec->bit_rate * (int64_t)st->time_base.num);
 
-    if ((ret = url_fseek(s->pb, ((pos-7) >> 3) + s->data_offset, SEEK_SET)) < 0)
+    if ((ret = avio_seek(s->pb, ((pos-7) >> 3) + s->data_offset, SEEK_SET)) < 0)
         return ret;
 
     c->remaining_bits = -7 - ((pos-7)&7);

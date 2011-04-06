@@ -45,12 +45,15 @@ void avfilter_register_all(void)
     REGISTER_FILTER (CROP,        crop,        vf);
     REGISTER_FILTER (CROPDETECT,  cropdetect,  vf);
     REGISTER_FILTER (DRAWBOX,     drawbox,     vf);
+    REGISTER_FILTER (DRAWTEXT,    drawtext,    vf);
+    REGISTER_FILTER (FADE,        fade,        vf);
     REGISTER_FILTER (FIFO,        fifo,        vf);
     REGISTER_FILTER (FORMAT,      format,      vf);
     REGISTER_FILTER (FREI0R,      frei0r,      vf);
     REGISTER_FILTER (GRADFUN,     gradfun,     vf);
     REGISTER_FILTER (HFLIP,       hflip,       vf);
     REGISTER_FILTER (HQDN3D,      hqdn3d,      vf);
+    REGISTER_FILTER (MP,          mp,          vf);
     REGISTER_FILTER (NOFORMAT,    noformat,    vf);
     REGISTER_FILTER (NULL,        null,        vf);
     REGISTER_FILTER (OCV,         ocv,         vf);
