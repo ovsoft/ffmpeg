@@ -639,7 +639,7 @@ static int ljpeg_decode_rgb_scan(MJpegDecodeContext *s, int predictor, int point
     }
     for(mb_y = 0; mb_y < s->mb_height; mb_y++) {
         const int modified_predictor= mb_y ? predictor : 1;
-        uint8_t *ptr = s->picture_ptr->data[0] + (linesize * mb_y);
+        uint8_t *ptr = s->picture.data[0] + (linesize * mb_y);
 
         if (s->interlaced && s->bottom_field)
             ptr += linesize >> 1;
@@ -716,7 +716,7 @@ static int ljpeg_decode_yuv_scan(MJpegDecodeContext *s, int predictor, int point
                     for(j=0; j<n; j++) {
                         int pred;
 
-                        ptr = s->picture_ptr->data[c] + (linesize * (v * mb_y + y)) + (h * mb_x + x); //FIXME optimize this crap
+                        ptr = s->picture.data[c] + (linesize * (v * mb_y + y)) + (h * mb_x + x); //FIXME optimize this crap
                         if(y==0 && mb_y==0){
                             if(x==0 && mb_x==0){
                                 pred= 128 << point_transform;
@@ -756,7 +756,7 @@ static int ljpeg_decode_yuv_scan(MJpegDecodeContext *s, int predictor, int point
                     for(j=0; j<n; j++) {
                         int pred;
 
-                        ptr = s->picture_ptr->data[c] + (linesize * (v * mb_y + y)) + (h * mb_x + x); //FIXME optimize this crap
+                        ptr = s->picture.data[c] + (linesize * (v * mb_y + y)) + (h * mb_x + x); //FIXME optimize this crap
                         PREDICT(pred, ptr[-linesize-1], ptr[-linesize], ptr[-1], predictor);
                         *ptr= pred + (mjpeg_decode_dc(s, s->dc_index[i]) << point_transform);
                         if (++x == h) {
@@ -892,43 +892,29 @@ static int mjpeg_decode_scan(MJpegDecodeContext *s, int nb_components, int Ah, i
     return 0;
 }
 
-static int mjpeg_decode_scan_progressive_ac(MJpegDecodeContext *s, int ss, int se, int Ah, int Al,
-                                            const uint8_t *mb_bitmask, const AVFrame *reference){
+static int mjpeg_decode_scan_progressive_ac(MJpegDecodeContext *s, int ss, int se, int Ah, int Al){
     int mb_x, mb_y;
     int EOBRUN = 0;
     int c = s->comp_index[0];
-    uint8_t* data = s->picture_ptr->data[c];
-    const uint8_t *reference_data = reference ? reference->data[c] : NULL;
+    uint8_t* data = s->picture.data[c];
     int linesize = s->linesize[c];
     int last_scan = 0;
     int16_t *quant_matrix = s->quant_matrixes[ s->quant_index[c] ];
-    GetBitContext mb_bitmask_gb;
-
-    if (mb_bitmask) {
-        init_get_bits(&mb_bitmask_gb, mb_bitmask, s->mb_width*s->mb_height);
-    }
 
     if(!Al) {
         s->coefs_finished[c] |= (1LL<<(se+1))-(1LL<<ss);
         last_scan = !~s->coefs_finished[c];
     }
 
-    if(s->interlaced && s->bottom_field) {
-        int offset = linesize >> 1;
-        data += offset;
-        reference_data += offset;
-    }
+    if(s->interlaced && s->bottom_field)
+        data += linesize >> 1;
 
     for(mb_y = 0; mb_y < s->mb_height; mb_y++) {
-        int block_offset = (mb_y*linesize*8 >> s->avctx->lowres);
-        uint8_t *ptr = data + block_offset;
+        uint8_t *ptr = data + (mb_y*linesize*8 >> s->avctx->lowres);
         int block_idx = mb_y * s->block_stride[c];
         DCTELEM (*block)[64] = &s->blocks[c][block_idx];
         uint8_t *last_nnz = &s->last_nnz[c][block_idx];
         for(mb_x = 0; mb_x < s->mb_width; mb_x++, block++, last_nnz++) {
-            const int copy_mb = mb_bitmask && !get_bits1(&mb_bitmask_gb);
-
-            if (!copy_mb) {
             int ret;
             if(Ah)
                 ret = decode_block_refinement(s, *block, last_nnz, s->ac_index[0],
@@ -940,15 +926,9 @@ static int mjpeg_decode_scan_progressive_ac(MJpegDecodeContext *s, int ss, int s
                 av_log(s->avctx, AV_LOG_ERROR, "error y=%d x=%d\n", mb_y, mb_x);
                 return -1;
             }
-            }
-
             if(last_scan) {
-                if (copy_mb) {
-                    mjpeg_copy_block(ptr, reference_data + block_offset, linesize, s->avctx->lowres);
-                } else {
                 s->dsp.idct_put(ptr, linesize, *block);
                 ptr += 8 >> s->avctx->lowres;
-                }
             }
         }
     }
