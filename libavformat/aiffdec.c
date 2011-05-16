@@ -23,6 +23,7 @@
 #include "avformat.h"
 #include "pcm.h"
 #include "aiff.h"
+#include "isom.h"
 
 #define AIFF                    0
 #define AIFF_C_VERSION1         0xA2805140
@@ -67,19 +68,20 @@ static int get_tag(AVIOContext *pb, uint32_t * tag)
 static void get_meta(AVFormatContext *s, const char *key, int size)
 {
     uint8_t *str = av_malloc(size+1);
-    int res;
 
-    if (!str) {
-        avio_skip(s->pb, size);
-        return;
-    }
+    if (str) {
+        int res = avio_read(s->pb, str, size);
+        if (res < 0){
+            av_free(str);
+            return;
+        }
+        size += (size&1)-res;
+        str[res] = 0;
+        av_metadata_set2(&s->metadata, key, str, AV_METADATA_DONT_STRDUP_VAL);
+    }else
+        size+= size&1;
 
-    res = avio_read(s->pb, str, size);
-    if (res < 0)
-        return;
-
-    str[res] = 0;
-    av_metadata_set2(&s->metadata, key, str, AV_METADATA_DONT_STRDUP_VAL);
+    avio_skip(s->pb, size);
 }
 
 /* Returns the number of sound data frames or negative on error */
@@ -252,6 +254,11 @@ static int aiff_read_header(AVFormatContext *s,
                 return AVERROR(ENOMEM);
             st->codec->extradata_size = size;
             avio_read(pb, st->codec->extradata, size);
+            break;
+        case MKTAG('C','H','A','N'):
+            if (size < 12)
+                return AVERROR_INVALIDDATA;
+            ff_mov_read_chan(s, size, st->codec);
             break;
         default: /* Jump */
             if (size & 1)   /* Always even aligned */

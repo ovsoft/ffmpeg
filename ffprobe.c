@@ -1,5 +1,5 @@
 /*
- * FFprobe : Simple Media Prober based on the FFmpeg libraries
+ * ffprobe : Simple Media Prober based on the FFmpeg libraries
  * Copyright (c) 2007-2010 Stefano Sabatini
  *
  * This file is part of FFmpeg.
@@ -23,12 +23,12 @@
 
 #include "libavformat/avformat.h"
 #include "libavcodec/avcodec.h"
-#include "libavcodec/opt.h"
+#include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
 #include "libavdevice/avdevice.h"
 #include "cmdutils.h"
 
-const char program_name[] = "FFprobe";
+const char program_name[] = "ffprobe";
 const int program_birth_year = 2007;
 
 static int do_show_format  = 0;

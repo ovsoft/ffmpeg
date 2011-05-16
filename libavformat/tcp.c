@@ -19,10 +19,12 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 #include "avformat.h"
+#include "libavutil/parseutils.h"
 #include <unistd.h>
 #include "internal.h"
 #include "network.h"
 #include "os_support.h"
+#include "url.h"
 #if HAVE_POLL_H
 #include <poll.h>
 #endif
@@ -38,6 +40,9 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
     struct addrinfo hints, *ai, *cur_ai;
     int port, fd = -1;
     TCPContext *s = NULL;
+    int listen_socket = 0;
+    const char *p;
+    char buf[256];
     int ret;
     socklen_t optlen;
     char hostname[1024],proto[1024],path[1024];
@@ -48,13 +53,18 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
     if (strcmp(proto,"tcp") || port <= 0 || port >= 65536)
         return AVERROR(EINVAL);
 
+    p = strchr(uri, '?');
+    if (p) {
+        if (av_find_info_tag(buf, sizeof(buf), "listen", p))
+            listen_socket = 1;
+    }
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
     snprintf(portstr, sizeof(portstr), "%d", port);
     ret = getaddrinfo(hostname, portstr, &hints, &ai);
     if (ret) {
-        av_log(NULL, AV_LOG_ERROR,
+        av_log(h, AV_LOG_ERROR,
                "Failed to resolve hostname %s: %s\n",
                hostname, gai_strerror(ret));
         return AVERROR(EIO);
@@ -66,10 +76,21 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
     fd = socket(cur_ai->ai_family, cur_ai->ai_socktype, cur_ai->ai_protocol);
     if (fd < 0)
         goto fail;
+
+    if (listen_socket) {
+        int fd1;
+        ret = bind(fd, cur_ai->ai_addr, cur_ai->ai_addrlen);
+        listen(fd, 1);
+        fd1 = accept(fd, NULL, NULL);
+        closesocket(fd);
+        fd = fd1;
+    } else {
+ redo:
+        ret = connect(fd, cur_ai->ai_addr, cur_ai->ai_addrlen);
+    }
+
     ff_socket_nonblock(fd, 1);
 
- redo:
-    ret = connect(fd, cur_ai->ai_addr, cur_ai->ai_addrlen);
     if (ret < 0) {
         int timeout=50;
         struct pollfd p = {fd, POLLOUT, 0};
@@ -105,7 +126,7 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
         optlen = sizeof(ret);
         getsockopt (fd, SOL_SOCKET, SO_ERROR, &ret, &optlen);
         if (ret != 0) {
-            av_log(NULL, AV_LOG_ERROR,
+            av_log(h, AV_LOG_ERROR,
                    "TCP connection to %s:%d failed: %s\n",
                    hostname, port, strerror(ret));
             goto fail;
@@ -138,23 +159,13 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
     return ret;
 }
 
-static int tcp_wait_fd(int fd, int write)
-{
-    int ev = write ? POLLOUT : POLLIN;
-    struct pollfd p = { .fd = fd, .events = ev, .revents = 0 };
-    int ret;
-
-    ret = poll(&p, 1, 100);
-    return ret < 0 ? ff_neterrno() : p.revents & ev ? 0 : AVERROR(EAGAIN);
-}
-
 static int tcp_read(URLContext *h, uint8_t *buf, int size)
 {
     TCPContext *s = h->priv_data;
     int ret;
 
-    if (!(h->flags & URL_FLAG_NONBLOCK)) {
-        ret = tcp_wait_fd(s->fd, 0);
+    if (!(h->flags & AVIO_FLAG_NONBLOCK)) {
+        ret = ff_network_wait_fd(s->fd, 0);
         if (ret < 0)
             return ret;
     }
@@ -167,8 +178,8 @@ static int tcp_write(URLContext *h, const uint8_t *buf, int size)
     TCPContext *s = h->priv_data;
     int ret;
 
-    if (!(h->flags & URL_FLAG_NONBLOCK)) {
-        ret = tcp_wait_fd(s->fd, 1);
+    if (!(h->flags & AVIO_FLAG_NONBLOCK)) {
+        ret = ff_network_wait_fd(s->fd, 1);
         if (ret < 0)
             return ret;
     }
@@ -191,11 +202,10 @@ static int tcp_get_file_handle(URLContext *h)
 }
 
 URLProtocol ff_tcp_protocol = {
-    "tcp",
-    tcp_open,
-    tcp_read,
-    tcp_write,
-    NULL, /* seek */
-    tcp_close,
+    .name                = "tcp",
+    .url_open            = tcp_open,
+    .url_read            = tcp_read,
+    .url_write           = tcp_write,
+    .url_close           = tcp_close,
     .url_get_file_handle = tcp_get_file_handle,
 };

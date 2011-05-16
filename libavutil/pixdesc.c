@@ -740,6 +740,52 @@ const AVPixFmtDescriptor av_pix_fmt_descriptors[PIX_FMT_NB] = {
         .log2_chroma_h = 1,
         .flags = PIX_FMT_HWACCEL,
     },
+    [PIX_FMT_YUV420P9LE] = {
+        .name = "yuv420p9le",
+        .nb_components= 3,
+        .log2_chroma_w= 1,
+        .log2_chroma_h= 1,
+        .comp = {
+            {0,1,1,0,8},        /* Y */
+            {1,1,1,0,8},        /* U */
+            {2,1,1,0,8},        /* V */
+        },
+    },
+    [PIX_FMT_YUV420P9BE] = {
+        .name = "yuv420p9be",
+        .nb_components= 3,
+        .log2_chroma_w= 1,
+        .log2_chroma_h= 1,
+        .comp = {
+            {0,1,1,0,8},        /* Y */
+            {1,1,1,0,8},        /* U */
+            {2,1,1,0,8},        /* V */
+        },
+        .flags = PIX_FMT_BE,
+    },
+    [PIX_FMT_YUV420P10LE] = {
+        .name = "yuv420p10le",
+        .nb_components= 3,
+        .log2_chroma_w= 1,
+        .log2_chroma_h= 1,
+        .comp = {
+            {0,1,1,0,9},        /* Y */
+            {1,1,1,0,9},        /* U */
+            {2,1,1,0,9},        /* V */
+        },
+    },
+    [PIX_FMT_YUV420P10BE] = {
+        .name = "yuv420p10be",
+        .nb_components= 3,
+        .log2_chroma_w= 1,
+        .log2_chroma_h= 1,
+        .comp = {
+            {0,1,1,0,9},        /* Y */
+            {1,1,1,0,9},        /* U */
+            {2,1,1,0,9},        /* V */
+        },
+        .flags = PIX_FMT_BE,
+    },
     [PIX_FMT_YUV420P16LE] = {
         .name = "yuv420p16le",
         .nb_components= 3,
@@ -760,6 +806,29 @@ const AVPixFmtDescriptor av_pix_fmt_descriptors[PIX_FMT_NB] = {
             {0,1,1,0,15},        /* Y */
             {1,1,1,0,15},        /* U */
             {2,1,1,0,15},        /* V */
+        },
+        .flags = PIX_FMT_BE,
+    },
+    [PIX_FMT_YUV422P10LE] = {
+        .name = "yuv422p10le",
+        .nb_components= 3,
+        .log2_chroma_w= 1,
+        .log2_chroma_h= 0,
+        .comp = {
+            {0,1,1,0,9},        /* Y */
+            {1,1,1,0,9},        /* U */
+            {2,1,1,0,9},        /* V */
+        },
+    },
+    [PIX_FMT_YUV422P10BE] = {
+        .name = "yuv422p10be",
+        .nb_components= 3,
+        .log2_chroma_w= 1,
+        .log2_chroma_h= 0,
+        .comp = {
+            {0,1,1,0,9},        /* Y */
+            {1,1,1,0,9},        /* U */
+            {2,1,1,0,9},        /* V */
         },
         .flags = PIX_FMT_BE,
     },
@@ -815,8 +884,8 @@ const AVPixFmtDescriptor av_pix_fmt_descriptors[PIX_FMT_NB] = {
         .log2_chroma_h = 1,
         .flags = PIX_FMT_HWACCEL,
     },
-    [PIX_FMT_Y400A] = {
-        .name = "y400a",
+    [PIX_FMT_GRAY8A] = {
+        .name = "gray8a",
         .nb_components= 2,
         .comp = {
             {0,1,1,0,7},        /* Y */

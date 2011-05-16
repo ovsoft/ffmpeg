@@ -31,13 +31,11 @@
 
 #define STR(s)         AV_TOSTRING(s) //AV_STRINGIFY is too long
 
+#define FAST_BGR2YV12 //use 7-bit instead of 15-bit coefficients
+
 #define MAX_FILTER_SIZE 256
 
-#if ARCH_X86
 #define VOFW 21504
-#else
-#define VOFW 2048 // faster on PPC and not tested on others
-#endif
 
 #define VOF  (VOFW*2)
 
@@ -352,6 +350,15 @@ const char *sws_format_name(enum PixelFormat format);
         || (x)==PIX_FMT_YUV422P16BE \
         || (x)==PIX_FMT_YUV444P16BE \
     )
+#define isNBPS(x)       (           \
+           (x)==PIX_FMT_YUV420P9LE  \
+        || (x)==PIX_FMT_YUV420P9BE  \
+        || (x)==PIX_FMT_YUV420P10LE \
+        || (x)==PIX_FMT_YUV420P10BE \
+        || (x)==PIX_FMT_YUV422P10LE \
+        || (x)==PIX_FMT_YUV422P10BE \
+    )
+#define is9_OR_10BPS isNBPS //for ronald
 #define isBE(x) ((x)&1)
 #define isPlanar8YUV(x) (           \
            (x)==PIX_FMT_YUV410P     \
@@ -366,10 +373,16 @@ const char *sws_format_name(enum PixelFormat format);
     )
 #define isPlanarYUV(x)  (           \
         isPlanar8YUV(x)             \
+        || (x)==PIX_FMT_YUV420P9LE  \
+        || (x)==PIX_FMT_YUV420P10LE \
         || (x)==PIX_FMT_YUV420P16LE \
+        || (x)==PIX_FMT_YUV422P10LE \
         || (x)==PIX_FMT_YUV422P16LE \
         || (x)==PIX_FMT_YUV444P16LE \
+        || (x)==PIX_FMT_YUV420P9BE  \
+        || (x)==PIX_FMT_YUV420P10BE \
         || (x)==PIX_FMT_YUV420P16BE \
+        || (x)==PIX_FMT_YUV422P10BE \
         || (x)==PIX_FMT_YUV422P16BE \
         || (x)==PIX_FMT_YUV444P16BE \
     )
@@ -380,7 +393,7 @@ const char *sws_format_name(enum PixelFormat format);
     )
 #define isGray(x)       (           \
            (x)==PIX_FMT_GRAY8       \
-        || (x)==PIX_FMT_Y400A      \
+        || (x)==PIX_FMT_GRAY8A      \
         || (x)==PIX_FMT_GRAY16BE    \
         || (x)==PIX_FMT_GRAY16LE    \
     )
@@ -447,10 +460,11 @@ const char *sws_format_name(enum PixelFormat format);
         || (x)==PIX_FMT_BGR32_1     \
         || (x)==PIX_FMT_RGB32       \
         || (x)==PIX_FMT_RGB32_1     \
-        || (x)==PIX_FMT_Y400A       \
+        || (x)==PIX_FMT_PAL8        \
+        || (x)==PIX_FMT_GRAY8A      \
         || (x)==PIX_FMT_YUVA420P    \
     )
-#define usePal(x) ((av_pix_fmt_descriptors[x].flags & PIX_FMT_PAL) || (x) == PIX_FMT_Y400A)
+#define usePal(x) ((av_pix_fmt_descriptors[x].flags & PIX_FMT_PAL) || (x) == PIX_FMT_GRAY8A)
 
 extern const uint64_t ff_dither4[2];
 extern const uint64_t ff_dither8[2];

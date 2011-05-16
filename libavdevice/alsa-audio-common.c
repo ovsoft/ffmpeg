@@ -36,15 +36,45 @@
 static av_cold snd_pcm_format_t codec_id_to_pcm_format(int codec_id)
 {
     switch(codec_id) {
+        case CODEC_ID_PCM_F64LE: return SND_PCM_FORMAT_FLOAT64_LE;
+        case CODEC_ID_PCM_F64BE: return SND_PCM_FORMAT_FLOAT64_BE;
         case CODEC_ID_PCM_F32LE: return SND_PCM_FORMAT_FLOAT_LE;
         case CODEC_ID_PCM_F32BE: return SND_PCM_FORMAT_FLOAT_BE;
         case CODEC_ID_PCM_S32LE: return SND_PCM_FORMAT_S32_LE;
         case CODEC_ID_PCM_S32BE: return SND_PCM_FORMAT_S32_BE;
+        case CODEC_ID_PCM_U32LE: return SND_PCM_FORMAT_U32_LE;
+        case CODEC_ID_PCM_U32BE: return SND_PCM_FORMAT_U32_BE;
+        case CODEC_ID_PCM_S24LE: return SND_PCM_FORMAT_S24_3LE;
+        case CODEC_ID_PCM_S24BE: return SND_PCM_FORMAT_S24_3BE;
+        case CODEC_ID_PCM_U24LE: return SND_PCM_FORMAT_U24_3LE;
+        case CODEC_ID_PCM_U24BE: return SND_PCM_FORMAT_U24_3BE;
         case CODEC_ID_PCM_S16LE: return SND_PCM_FORMAT_S16_LE;
         case CODEC_ID_PCM_S16BE: return SND_PCM_FORMAT_S16_BE;
+        case CODEC_ID_PCM_U16LE: return SND_PCM_FORMAT_U16_LE;
+        case CODEC_ID_PCM_U16BE: return SND_PCM_FORMAT_U16_BE;
         case CODEC_ID_PCM_S8:    return SND_PCM_FORMAT_S8;
+        case CODEC_ID_PCM_U8:    return SND_PCM_FORMAT_U8;
+        case CODEC_ID_PCM_MULAW: return SND_PCM_FORMAT_MU_LAW;
+        case CODEC_ID_PCM_ALAW:  return SND_PCM_FORMAT_A_LAW;
         default:                 return SND_PCM_FORMAT_UNKNOWN;
     }
+}
+
+#define REORDER_OUT_50(NAME, TYPE) \
+static void alsa_reorder_ ## NAME ## _out_50(const void *in_v, void *out_v, int n) \
+{ \
+    const TYPE *in = in_v; \
+    TYPE * out = out_v; \
+\
+    while (n-- > 0) { \
+        out[0] = in[0]; \
+        out[1] = in[1]; \
+        out[2] = in[3]; \
+        out[3] = in[4]; \
+        out[4] = in[2]; \
+        in  += 5; \
+        out += 5; \
+    } \
 }
 
 #define REORDER_OUT_51(NAME, TYPE) \
@@ -85,10 +115,15 @@ static void alsa_reorder_ ## NAME ## _out_71(const void *in_v, void *out_v, int 
     } \
 }
 
-REORDER_OUT_51(s16, int16_t)
-REORDER_OUT_71(s16, int16_t)
-REORDER_OUT_51(s32, int32_t)
-REORDER_OUT_71(s32, int32_t)
+REORDER_OUT_50(int16, int16_t)
+REORDER_OUT_51(int16, int16_t)
+REORDER_OUT_71(int16, int16_t)
+REORDER_OUT_50(int32, int32_t)
+REORDER_OUT_51(int32, int32_t)
+REORDER_OUT_71(int32, int32_t)
+REORDER_OUT_50(f32, float)
+REORDER_OUT_51(f32, float)
+REORDER_OUT_71(f32, float)
 
 #define REORDER_DUMMY ((void *)1)
 
@@ -97,19 +132,38 @@ static av_cold ff_reorder_func find_reorder_func(int codec_id,
                                                  int out)
 {
     return
+    codec_id == CODEC_ID_PCM_U16LE || codec_id == CODEC_ID_PCM_U16BE ||
     codec_id == CODEC_ID_PCM_S16LE || codec_id == CODEC_ID_PCM_S16BE ?
-        layout == AV_CH_LAYOUT_QUAD ? REORDER_DUMMY :
+        layout == AV_CH_LAYOUT_QUAD || layout == AV_CH_LAYOUT_2_2 ?
+            REORDER_DUMMY :
+        layout == AV_CH_LAYOUT_5POINT0_BACK || layout == AV_CH_LAYOUT_5POINT0 ?
+            out ? alsa_reorder_int16_out_50 : NULL :
         layout == AV_CH_LAYOUT_5POINT1_BACK || layout == AV_CH_LAYOUT_5POINT1 ?
-            out ? alsa_reorder_s16_out_51 : NULL :
+            out ? alsa_reorder_int16_out_51 : NULL :
         layout == AV_CH_LAYOUT_7POINT1 ?
-            out ? alsa_reorder_s16_out_71 : NULL :
+            out ? alsa_reorder_int16_out_71 : NULL :
             NULL :
+    codec_id == CODEC_ID_PCM_U32LE || codec_id == CODEC_ID_PCM_U32BE ||
     codec_id == CODEC_ID_PCM_S32LE || codec_id == CODEC_ID_PCM_S32BE ?
+        layout == AV_CH_LAYOUT_QUAD || layout == AV_CH_LAYOUT_2_2 ?
+            REORDER_DUMMY :
+        layout == AV_CH_LAYOUT_5POINT0_BACK || layout == AV_CH_LAYOUT_5POINT0 ?
+            out ? alsa_reorder_int32_out_50 : NULL :
         layout == AV_CH_LAYOUT_5POINT1_BACK || layout == AV_CH_LAYOUT_5POINT1 ?
-            out ? alsa_reorder_s32_out_51 : NULL :
+            out ? alsa_reorder_int32_out_51 : NULL :
         layout == AV_CH_LAYOUT_7POINT1 ?
-            out ? alsa_reorder_s32_out_71 : NULL :
-           NULL :
+            out ? alsa_reorder_int32_out_71 : NULL :
+            NULL :
+    codec_id == CODEC_ID_PCM_F32LE || codec_id == CODEC_ID_PCM_F32BE ?
+        layout == AV_CH_LAYOUT_QUAD || layout == AV_CH_LAYOUT_2_2 ?
+            REORDER_DUMMY :
+        layout == AV_CH_LAYOUT_5POINT0_BACK || layout == AV_CH_LAYOUT_5POINT0 ?
+            out ? alsa_reorder_f32_out_50 : NULL :
+        layout == AV_CH_LAYOUT_5POINT1_BACK || layout == AV_CH_LAYOUT_5POINT1 ?
+            out ? alsa_reorder_f32_out_51 : NULL :
+        layout == AV_CH_LAYOUT_7POINT1 ?
+            out ? alsa_reorder_f32_out_71 : NULL :
+            NULL :
         NULL;
 }
 
@@ -228,7 +282,7 @@ av_cold int ff_alsa_open(AVFormatContext *ctx, snd_pcm_stream_t mode,
             if (!s->reorder_buf)
                 goto fail1;
         } else {
-            char name[16];
+            char name[32];
             av_get_channel_layout_string(name, sizeof(name), channels, layout);
             av_log(ctx, AV_LOG_WARNING,
                    "ALSA channel layout unknown or unimplemented for %s %s.\n",

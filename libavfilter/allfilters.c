@@ -47,6 +47,7 @@ void avfilter_register_all(void)
     REGISTER_FILTER (DRAWBOX,     drawbox,     vf);
     REGISTER_FILTER (DRAWTEXT,    drawtext,    vf);
     REGISTER_FILTER (FADE,        fade,        vf);
+    REGISTER_FILTER (FIELDORDER,  fieldorder,  vf);
     REGISTER_FILTER (FIFO,        fifo,        vf);
     REGISTER_FILTER (FORMAT,      format,      vf);
     REGISTER_FILTER (FREI0R,      frei0r,      vf);
@@ -65,6 +66,7 @@ void avfilter_register_all(void)
     REGISTER_FILTER (SETPTS,      setpts,      vf);
     REGISTER_FILTER (SETSAR,      setsar,      vf);
     REGISTER_FILTER (SETTB,       settb,       vf);
+    REGISTER_FILTER (SHOWINFO,    showinfo,    vf);
     REGISTER_FILTER (SLICIFY,     slicify,     vf);
     REGISTER_FILTER (TRANSPOSE,   transpose,   vf);
     REGISTER_FILTER (UNSHARP,     unsharp,     vf);

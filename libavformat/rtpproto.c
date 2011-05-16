@@ -138,14 +138,12 @@ static int rtp_open(URLContext *h, const char *uri, int flags)
 {
     RTPContext *s;
     int rtp_port, rtcp_port,
-        is_output, ttl, connect,
+        ttl, connect,
         local_rtp_port, local_rtcp_port, max_packet_size;
     char hostname[256];
     char buf[1024];
     char path[1024];
     const char *p;
-
-    is_output = (flags & URL_WRONLY);
 
     s = av_mallocz(sizeof(RTPContext));
     if (!s)
@@ -355,11 +353,10 @@ int rtp_get_rtcp_file_handle(URLContext *h) {
 }
 
 URLProtocol ff_rtp_protocol = {
-    "rtp",
-    rtp_open,
-    rtp_read,
-    rtp_write,
-    NULL, /* seek */
-    rtp_close,
+    .name                = "rtp",
+    .url_open            = rtp_open,
+    .url_read            = rtp_read,
+    .url_write           = rtp_write,
+    .url_close           = rtp_close,
     .url_get_file_handle = rtp_get_file_handle,
 };

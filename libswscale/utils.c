@@ -41,6 +41,7 @@
 #include "rgb2rgb.h"
 #include "libavutil/intreadwrite.h"
 #include "libavutil/x86_cpu.h"
+#include "libavutil/cpu.h"
 #include "libavutil/avutil.h"
 #include "libavutil/bswap.h"
 #include "libavutil/opt.h"
@@ -84,7 +85,7 @@ const char *swscale_license(void)
         || (x)==PIX_FMT_RGB565      \
         || (x)==PIX_FMT_RGB555      \
         || (x)==PIX_FMT_GRAY8       \
-        || (x)==PIX_FMT_Y400A       \
+        || (x)==PIX_FMT_GRAY8A      \
         || (x)==PIX_FMT_YUV410P     \
         || (x)==PIX_FMT_YUV440P     \
         || (x)==PIX_FMT_NV12        \
@@ -106,12 +107,17 @@ const char *swscale_license(void)
         || (x)==PIX_FMT_YUV440P     \
         || (x)==PIX_FMT_MONOWHITE   \
         || (x)==PIX_FMT_MONOBLACK   \
+        || (x)==PIX_FMT_YUV420P9LE    \
+        || (x)==PIX_FMT_YUV420P10LE   \
         || (x)==PIX_FMT_YUV420P16LE   \
         || (x)==PIX_FMT_YUV422P16LE   \
         || (x)==PIX_FMT_YUV444P16LE   \
+        || (x)==PIX_FMT_YUV420P9BE    \
+        || (x)==PIX_FMT_YUV420P10BE   \
         || (x)==PIX_FMT_YUV420P16BE   \
         || (x)==PIX_FMT_YUV422P16BE   \
         || (x)==PIX_FMT_YUV444P16BE   \
+        || (x)==PIX_FMT_YUV422P10     \
     )
 
 int sws_isSupportedInput(enum PixelFormat pix_fmt)
@@ -139,9 +145,14 @@ int sws_isSupportedInput(enum PixelFormat pix_fmt)
         || (x)==PIX_FMT_GRAY8       \
         || (x)==PIX_FMT_YUV410P     \
         || (x)==PIX_FMT_YUV440P     \
+        || (x)==PIX_FMT_YUV422P10   \
+        || (x)==PIX_FMT_YUV420P9LE    \
+        || (x)==PIX_FMT_YUV420P10LE   \
         || (x)==PIX_FMT_YUV420P16LE   \
         || (x)==PIX_FMT_YUV422P16LE   \
         || (x)==PIX_FMT_YUV444P16LE   \
+        || (x)==PIX_FMT_YUV420P9BE    \
+        || (x)==PIX_FMT_YUV420P10BE   \
         || (x)==PIX_FMT_YUV420P16BE   \
         || (x)==PIX_FMT_YUV422P16BE   \
         || (x)==PIX_FMT_YUV444P16BE   \
@@ -740,6 +751,13 @@ static int update_flags_cpu(int flags)
                |SWS_CPU_CAPS_ALTIVEC
                |SWS_CPU_CAPS_BFIN);
     flags |= ff_hardcodedcpuflags();
+#else /* !CONFIG_RUNTIME_CPUDETECT */
+    int cpuflags = av_get_cpu_flags();
+
+    flags |= (cpuflags & AV_CPU_FLAG_SSE2 ? SWS_CPU_CAPS_SSE2 : 0);
+    flags |= (cpuflags & AV_CPU_FLAG_MMX ? SWS_CPU_CAPS_MMX : 0);
+    flags |= (cpuflags & AV_CPU_FLAG_MMX2 ? SWS_CPU_CAPS_MMX2 : 0);
+    flags |= (cpuflags & AV_CPU_FLAG_3DNOW ? SWS_CPU_CAPS_3DNOW : 0);
 #endif /* CONFIG_RUNTIME_CPUDETECT */
     return flags;
 }
@@ -917,7 +935,11 @@ int sws_init_context(SwsContext *c, SwsFilter *srcFilter, SwsFilter *dstFilter)
             c->chrMmx2FilterCode = av_malloc(c->chrMmx2FilterCodeSize);
 #endif
 
+#ifdef MAP_ANONYMOUS
+            if (c->lumMmx2FilterCode == MAP_FAILED || c->chrMmx2FilterCode == MAP_FAILED)
+#else
             if (!c->lumMmx2FilterCode || !c->chrMmx2FilterCode)
+#endif
                 return AVERROR(ENOMEM);
             FF_ALLOCZ_OR_GOTO(c, c->hLumFilter   , (dstW        /8+8)*sizeof(int16_t), fail);
             FF_ALLOCZ_OR_GOTO(c, c->hChrFilter   , (c->chrDstW  /4+8)*sizeof(int16_t), fail);
@@ -994,7 +1016,7 @@ int sws_init_context(SwsContext *c, SwsFilter *srcFilter, SwsFilter *dstFilter)
     c->vLumBufSize= c->vLumFilterSize;
     c->vChrBufSize= c->vChrFilterSize;
     for (i=0; i<dstH; i++) {
-        int chrI= i*c->chrDstH / dstH;
+        int chrI= (int64_t)i*c->chrDstH / dstH;
         int nextSlice= FFMAX(c->vLumFilterPos[i   ] + c->vLumFilterSize - 1,
                            ((c->vChrFilterPos[chrI] + c->vChrFilterSize - 1)<<c->chrSrcVSubSample));
 

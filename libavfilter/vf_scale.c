@@ -75,8 +75,8 @@ typedef struct {
     int input_is_pal;           ///< set to 1 if the input format is paletted
     int interlaced;
 
-    char w_expr[256];             ///< width  expression string
-    char h_expr[256];             ///< height expression string
+    char w_expr[256];           ///< width  expression string
+    char h_expr[256];           ///< height expression string
 } ScaleContext;
 
 static av_cold int init(AVFilterContext *ctx, const char *args, void *opaque)
@@ -158,19 +158,19 @@ static int config_props(AVFilterLink *outlink)
     var_values[VAR_OUT_W] = var_values[VAR_OW] = NAN;
     var_values[VAR_OUT_H] = var_values[VAR_OH] = NAN;
     var_values[VAR_A]     = (float) inlink->w / inlink->h;
-    var_values[VAR_HSUB]  = 2<<av_pix_fmt_descriptors[inlink->format].log2_chroma_w;
-    var_values[VAR_VSUB]  = 2<<av_pix_fmt_descriptors[inlink->format].log2_chroma_h;
+    var_values[VAR_HSUB]  = 1<<av_pix_fmt_descriptors[inlink->format].log2_chroma_w;
+    var_values[VAR_VSUB]  = 1<<av_pix_fmt_descriptors[inlink->format].log2_chroma_h;
 
     /* evaluate width and height */
     av_expr_parse_and_eval(&res, (expr = scale->w_expr),
                            var_names, var_values,
                            NULL, NULL, NULL, NULL, NULL, 0, ctx);
-    scale->w = var_values[VAR_OW] = res;
+    scale->w = var_values[VAR_OUT_W] = var_values[VAR_OW] = res;
     if ((ret = av_expr_parse_and_eval(&res, (expr = scale->h_expr),
                                       var_names, var_values,
                                       NULL, NULL, NULL, NULL, NULL, 0, ctx)) < 0)
         goto fail;
-    scale->h = var_values[VAR_OH] = res;
+    scale->h = var_values[VAR_OUT_H] = var_values[VAR_OH] = res;
     /* evaluate again the width, as it may depend on the output height */
     if ((ret = av_expr_parse_and_eval(&res, (expr = scale->w_expr),
                                       var_names, var_values,
@@ -214,14 +214,18 @@ static int config_props(AVFilterLink *outlink)
 
     scale->input_is_pal = av_pix_fmt_descriptors[inlink->format].flags & PIX_FMT_PAL;
 
-    if(scale->sws)
+    if (scale->sws)
         sws_freeContext(scale->sws);
     scale->sws = sws_getContext(inlink ->w, inlink ->h, inlink ->format,
                                 outlink->w, outlink->h, outlink->format,
                                 scale->flags, NULL, NULL, NULL);
+    if (scale->isws[0])
+        sws_freeContext(scale->isws[0]);
     scale->isws[0] = sws_getContext(inlink ->w, inlink ->h/2, inlink ->format,
                                     outlink->w, outlink->h/2, outlink->format,
                                     scale->flags, NULL, NULL, NULL);
+    if (scale->isws[1])
+        sws_freeContext(scale->isws[1]);
     scale->isws[1] = sws_getContext(inlink ->w, inlink ->h/2, inlink ->format,
                                     outlink->w, outlink->h/2, outlink->format,
                                     scale->flags, NULL, NULL, NULL);
@@ -252,9 +256,9 @@ static void start_frame(AVFilterLink *link, AVFilterBufferRef *picref)
 
     outlink->out_buf = outpicref;
 
-    av_reduce(&outpicref->video->pixel_aspect.num, &outpicref->video->pixel_aspect.den,
-              (int64_t)picref->video->pixel_aspect.num * outlink->h * link->w,
-              (int64_t)picref->video->pixel_aspect.den * outlink->w * link->h,
+    av_reduce(&outpicref->video->sample_aspect_ratio.num, &outpicref->video->sample_aspect_ratio.den,
+              (int64_t)picref->video->sample_aspect_ratio.num * outlink->h * link->w,
+              (int64_t)picref->video->sample_aspect_ratio.den * outlink->w * link->h,
               INT_MAX);
 
     scale->slice_y = 0;

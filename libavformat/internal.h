@@ -31,20 +31,18 @@ typedef struct AVCodecTag {
     unsigned int tag;
 } AVCodecTag;
 
-void ff_dynarray_add(intptr_t **tab_ptr, int *nb_ptr, intptr_t elem);
-
 #ifdef __GNUC__
 #define dynarray_add(tab, nb_ptr, elem)\
 do {\
     __typeof__(tab) _tab = (tab);\
     __typeof__(elem) _elem = (elem);\
     (void)sizeof(**_tab == _elem); /* check that types are compatible */\
-    ff_dynarray_add((intptr_t **)_tab, nb_ptr, (intptr_t)_elem);\
+    av_dynarray_add(_tab, nb_ptr, _elem);\
 } while(0)
 #else
 #define dynarray_add(tab, nb_ptr, elem)\
 do {\
-    ff_dynarray_add((intptr_t **)(tab), nb_ptr, (intptr_t)(elem));\
+    av_dynarray_add((tab), nb_ptr, (elem));\
 } while(0)
 #endif
 
@@ -78,18 +76,6 @@ void ff_read_frame_flush(AVFormatContext *s);
 
 /** Get the current time since NTP epoch in microseconds. */
 uint64_t ff_ntp_time(void);
-
-#if FF_API_URL_SPLIT
-/**
- * @deprecated use av_url_split() instead
- */
-void ff_url_split(char *proto, int proto_size,
-                  char *authorization, int authorization_size,
-                  char *hostname, int hostname_size,
-                  int *port_ptr,
-                  char *path, int path_size,
-                  const char *url);
-#endif
 
 /**
  * Assemble a URL string from components. This is the reverse operation
@@ -249,5 +235,7 @@ void ff_reduce_index(AVFormatContext *s, int stream_index);
  */
 void ff_make_absolute_url(char *buf, int size, const char *base,
                           const char *rel);
+
+enum CodecID ff_guess_image2_codec(const char *filename);
 
 #endif /* AVFORMAT_INTERNAL_H */

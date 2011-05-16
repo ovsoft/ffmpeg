@@ -247,10 +247,20 @@ static void putDescr(AVIOContext *pb, int tag, unsigned int size)
     avio_w8(pb, size & 0x7F);
 }
 
+static unsigned compute_avg_bitrate(MOVTrack *track)
+{
+    uint64_t size = 0;
+    int i;
+    for (i = 0; i < track->entry; i++)
+        size += track->cluster[i].size;
+    return size * 8 * track->timescale / track->trackDuration;
+}
+
 static int mov_write_esds_tag(AVIOContext *pb, MOVTrack *track) // Basic
 {
     int64_t pos = avio_tell(pb);
     int decoderSpecificInfoLen = track->vosLen ? 5+track->vosLen : 0;
+    unsigned avg_bitrate;
 
     avio_wb32(pb, 0); // size
     ffio_wfourcc(pb, "esds");
@@ -282,11 +292,10 @@ static int mov_write_esds_tag(AVIOContext *pb, MOVTrack *track) // Basic
     avio_w8(pb,  track->enc->rc_buffer_size>>(3+16));      // Buffersize DB (24 bits)
     avio_wb16(pb, (track->enc->rc_buffer_size>>3)&0xFFFF); // Buffersize DB
 
-    avio_wb32(pb, FFMAX(track->enc->bit_rate, track->enc->rc_max_rate)); // maxbitrate (FIXME should be max rate in any 1 sec window)
-    if(track->enc->rc_max_rate != track->enc->rc_min_rate || track->enc->rc_min_rate==0)
-        avio_wb32(pb, 0); // vbr
-    else
-        avio_wb32(pb, track->enc->rc_max_rate); // avg bitrate
+    avg_bitrate = compute_avg_bitrate(track);
+    // maxbitrate (FIXME should be max rate in any 1 sec window)
+    avio_wb32(pb, FFMAX3(track->enc->bit_rate, track->enc->rc_max_rate, avg_bitrate));
+    avio_wb32(pb, avg_bitrate);
 
     if (track->vosLen) {
         // DecoderSpecific info descriptor
@@ -820,7 +829,7 @@ static int mov_write_video_tag(AVIOContext *pb, MOVTrack *track)
     memset(compressor_name,0,32);
     /* FIXME not sure, ISO 14496-1 draft where it shall be set to 0 */
     if (track->mode == MODE_MOV && track->enc->codec && track->enc->codec->name)
-        strncpy(compressor_name,track->enc->codec->name,31);
+        av_strlcpy(compressor_name,track->enc->codec->name,32);
     avio_w8(pb, strlen(compressor_name));
     avio_write(pb, compressor_name, 31);
 
@@ -1984,6 +1993,10 @@ int ff_mov_write_packet(AVFormatContext *s, AVPacket *pkt)
         /* from x264 or from bytestream h264 */
         /* nal reformating needed */
         size = ff_avc_parse_nal_units(pb, pkt->data, pkt->size);
+    } else if (enc->codec_id == CODEC_ID_AAC && pkt->size > 2 &&
+               (AV_RB16(pkt->data) & 0xfff0) == 0xfff0) {
+        av_log(s, AV_LOG_ERROR, "malformated aac bitstream, use -absf aac_adtstoasc\n");
+        return -1;
     } else {
         avio_write(pb, pkt->data, size);
     }

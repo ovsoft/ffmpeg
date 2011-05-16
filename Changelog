@@ -9,6 +9,16 @@ version <next>:
 - mpeg2 aspect ratio dection fixed
 - libxvid aspect pickiness fixed
 - Frame multithreaded decoding
+- Lots of deprecated API cruft removed
+- fft and imdct optimizations for AVX (Sandy Bridge) processors
+- showinfo filter added
+- DPX image encoder
+- SMPTE 302M AES3 audio decoder
+- Apple Core Audio Format muxer
+
+
+version 0.7_beta1:
+
 - WebM support in Matroska de/muxer
 - low overhead Ogg muxing
 - MMS-TCP support
@@ -89,6 +99,12 @@ version <next>:
 - Chronomaster DFA decoder
 - DPX image encoder
 - MicroDVD subtitle file muxer and demuxer
+- Playstation Portable PMP format demuxer
+- fieldorder video filter added
+- AAC encoding via libvo-aacenc
+- AMR-WB encoding via libvo-amrwbenc
+- xWMA demuxer
+- Mobotix MxPEG decoder
 
 
 version 0.6:
@@ -329,6 +345,7 @@ version 0.5:
 - Gopher client support
 - MXF D-10 muxer
 - generic metadata API
+- flash ScreenVideo2 encoder
 
 
 version 0.4.9-pre1:

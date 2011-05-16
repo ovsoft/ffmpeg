@@ -30,8 +30,6 @@
 #include "swscale.h"
 #include "swscale_internal.h"
 
-#define FAST_BGR2YV12 // use 7-bit instead of 15-bit coefficients
-
 void (*rgb24tobgr32)(const uint8_t *src, uint8_t *dst, long src_size);
 void (*rgb24tobgr16)(const uint8_t *src, uint8_t *dst, long src_size);
 void (*rgb24tobgr15)(const uint8_t *src, uint8_t *dst, long src_size);
@@ -201,7 +199,7 @@ DECLARE_ASM_CONST(8, uint64_t, blue_15mask)  = 0x0000001f0000001fULL;
 
 void sws_rgb2rgb_init(int flags)
 {
-#if HAVE_MMX2 || HAVE_AMD3DNOW || HAVE_MMX
+#if HAVE_SSE2 || HAVE_MMX2 || HAVE_AMD3DNOW || HAVE_MMX
     if (flags & SWS_CPU_CAPS_SSE2)
         rgb2rgb_init_SSE2();
     else if (flags & SWS_CPU_CAPS_MMX2)

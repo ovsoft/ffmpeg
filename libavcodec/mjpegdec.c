@@ -34,6 +34,7 @@
 #include <assert.h>
 
 #include "libavutil/imgutils.h"
+#include "libavutil/avassert.h"
 #include "avcodec.h"
 #include "dsputil.h"
 #include "mjpeg.h"
@@ -81,12 +82,9 @@ av_cold int ff_mjpeg_decode_init(AVCodecContext *avctx)
 {
     MJpegDecodeContext *s = avctx->priv_data;
 
-    if (!s->picture_ptr) {
-        s->picture_ptr = av_mallocz(sizeof(AVFrame));
-        if (!s->picture_ptr)
-              return AVERROR(ENOMEM);
-        s->picture_ptr->reference = 0;
-    }
+    if (!s->picture_ptr)
+        s->picture_ptr = &s->picture;
+    avcodec_get_frame_defaults(&s->picture);
 
     s->avctx = avctx;
     dsputil_init(&s->dsp, avctx);
@@ -356,7 +354,7 @@ int ff_mjpeg_decode_sof(MJpegDecodeContext *s)
         av_log(s->avctx, AV_LOG_ERROR, "get_buffer() failed\n");
         return -1;
     }
-    s->picture_ptr->pict_type= FF_I_TYPE;
+    s->picture_ptr->pict_type= AV_PICTURE_TYPE_I;
     s->picture_ptr->key_frame= 1;
     s->got_picture = 1;
 
@@ -830,6 +828,10 @@ static int mjpeg_decode_scan(MJpegDecodeContext *s, int nb_components, int Ah, i
             if (s->restart_interval && !s->restart_count)
                 s->restart_count = s->restart_interval;
 
+            if(get_bits_count(&s->gb)>s->gb.size_in_bits){
+                av_log(s->avctx, AV_LOG_ERROR, "overread %d\n", get_bits_count(&s->gb) - s->gb.size_in_bits);
+                return -1;
+            }
             for(i=0;i<nb_components;i++) {
                 uint8_t *ptr;
                 int n, h, v, x, y, c, j;
@@ -1039,6 +1041,7 @@ int ff_mjpeg_decode_sos(MJpegDecodeContext *s,
         skip_bits(&s->gb, 8);
 
     if(s->lossless){
+        av_assert0(s->picture_ptr == &s->picture);
         if(CONFIG_JPEGLS_DECODER && s->ls){
 //            for(){
 //            reset_ls_coding_parameters(s, 0);
@@ -1056,8 +1059,8 @@ int ff_mjpeg_decode_sos(MJpegDecodeContext *s,
         }
     }else{
         if(s->progressive && predictor) {
-            if(mjpeg_decode_scan_progressive_ac(s, predictor, ilv, prev_shift, point_transform,
-                                                mb_bitmask, reference) < 0)
+            av_assert0(s->picture_ptr == &s->picture);
+            if(mjpeg_decode_scan_progressive_ac(s, predictor, ilv, prev_shift, point_transform) < 0)
                 return -1;
         } else {
             if(mjpeg_decode_scan(s, nb_components, prev_shift, point_transform,
@@ -1299,9 +1302,7 @@ static int find_marker(const uint8_t **pbuf_ptr, const uint8_t *buf_end)
     const uint8_t *buf_ptr;
     unsigned int v, v2;
     int val;
-#ifdef DEBUG
     int skipped=0;
-#endif
 
     buf_ptr = *pbuf_ptr;
     while (buf_ptr < buf_end) {
@@ -1311,9 +1312,7 @@ static int find_marker(const uint8_t **pbuf_ptr, const uint8_t *buf_end)
             val = *buf_ptr++;
             goto found;
         }
-#ifdef DEBUG
         skipped++;
-#endif
     }
     val = -1;
 found:
@@ -1599,12 +1598,8 @@ av_cold int ff_mjpeg_decode_end(AVCodecContext *avctx)
     MJpegDecodeContext *s = avctx->priv_data;
     int i, j;
 
-    if (s->picture_ptr) {
-        if (s->picture_ptr->data[0]) {
-            avctx->release_buffer(avctx, s->picture_ptr);
-        }
-        av_freep(&s->picture_ptr);
-    }
+    if (s->picture_ptr && s->picture_ptr->data[0])
+        avctx->release_buffer(avctx, s->picture_ptr);
 
     av_free(s->buffer);
     av_free(s->qscale_table);

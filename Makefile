@@ -93,6 +93,7 @@ tools/%.o: tools/%.c
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $(CC_O) $<
 
 -include $(wildcard tools/*.d)
+-include $(wildcard tests/*.d)
 
 ffplay.o: CFLAGS += $(SDL_CFLAGS)
 
@@ -180,7 +181,7 @@ config:
 
 # regression tests
 
-check: test checkheaders
+check: test
 
 fulltest test: codectest lavftest lavfitest seektest
 
@@ -279,9 +280,13 @@ fate-seek:   $(FATE_SEEK)
 
 ifdef SAMPLES
 FATE += $(FATE_TESTS)
+fate-rsync:
+	rsync -vaLW rsync://fate-suite.libav.org/fate-suite/ $(SAMPLES)
 else
+fate-rsync:
+	@echo "use 'make fate-rsync SAMPLES=/path/to/samples' to sync the fate suite"
 $(FATE_TESTS):
-	@echo "SAMPLES not specified, cannot run FATE"
+	@echo "SAMPLES not specified, cannot run FATE. See doc/fate.txt for more information."
 endif
 
 FATE_UTILS = base64 tiny_psnr
@@ -290,7 +295,7 @@ fate: $(FATE)
 
 $(FATE): ffmpeg$(EXESUF) $(FATE_UTILS:%=tests/%$(HOSTEXESUF))
 	@echo "TEST    $(@:fate-%=%)"
-	$(Q)$(SRC_PATH)/tests/fate-run.sh $@ "$(SAMPLES)" "$(TARGET_EXEC)" "$(TARGET_PATH)" '$(CMD)' '$(CMP)' '$(REF)' '$(FUZZ)' '$(THREADS)'
+	$(Q)$(SRC_PATH)/tests/fate-run.sh $@ "$(SAMPLES)" "$(TARGET_EXEC)" "$(TARGET_PATH)" '$(CMD)' '$(CMP)' '$(REF)' '$(FUZZ)' '$(THREADS)' '$(THREAD_TYPE)'
 
 fate-list:
 	@printf '%s\n' $(sort $(FATE))

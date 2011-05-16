@@ -1,16 +1,106 @@
-Never assume the API of libav* to be stable unless at least 1 week has passed since
-the last major version increase.
+Never assume the API of libav* to be stable unless at least 1 month has passed
+since the last major version increase.
+
 The last version increases were:
-libavcodec:  ?
-libavdevice: ?
-libavfilter: 2009-10-18
-libavformat: ?
-libpostproc: ?
-libswscale:  ?
-libavutil:   2009-03-08
+libavcodec:  2011-04-18
+libavdevice: 2011-04-18
+libavfilter: 2011-04-18
+libavformat: 2011-04-18
+libpostproc: 2011-04-18
+libswscale:  2011-04-18
+libavutil:   2011-04-18
 
 
 API changes, most recent first:
+
+2011-05-10 - 188dea1 - lavc 53.3.0 - avcodec.h
+  Deprecate AVLPCType and the following fields in
+  AVCodecContext: lpc_coeff_precision, prediction_order_method,
+  min_partition_order, max_partition_order, lpc_type, lpc_passes.
+  Corresponding FLAC encoder options should be used instead.
+
+2011-05-07 - xxxxxxx - lavfi 2.5.0 - avcodec.h
+  Add libavfilter/avcodec.h header and avfilter_copy_frame_props()
+  function.
+
+2011-05-07 - xxxxxxx - lavc 53.5.0 - AVFrame
+  Add format field to AVFrame.
+
+2011-05-07 - xxxxxxx - lavc 53.4.0 - AVFrame
+  Add width and height fields to AVFrame.
+
+2011-05-01 - xxxxxxx - lavfi 2.4.0 - avfilter.h
+  Rename AVFilterBufferRefVideoProps.pixel_aspect to
+  sample_aspect_ratio.
+
+2011-05-01 - xxxxxxx - lavc 53.3.0 - AVFrame
+  Add a sample_aspect_ratio field to AVFrame.
+
+2011-05-01 - xxxxxxx - lavc 53.2.0 - AVFrame
+  Add a pkt_pos field to AVFrame.
+
+2011-04-xx - xxxxxxx - lavu 51.2.0 - mem.h
+  Add av_dynarray_add function for adding
+  an element to a dynamic array.
+
+2011-04-26 - bebe72f - lavu 51.1.0 - avutil.h
+  Add AVPictureType enum and av_get_picture_type_char(), deprecate
+  FF_*_TYPE defines and av_get_pict_type_char() defined in
+  libavcodec/avcodec.h.
+
+2011-04-26 - 10d3940 - lavfi 2.3.0 - avfilter.h
+  Add pict_type and key_frame fields to AVFilterBufferRefVideo.
+
+2011-04-26 - 7a11c82 - lavfi 2.2.0 - vsrc_buffer
+  Add sample_aspect_ratio fields to vsrc_buffer arguments
+
+2011-04-21 - 94f7451 - lavc 53.1.0 - avcodec.h
+  Add CODEC_CAP_SLICE_THREADS for codecs supporting sliced threading.
+
+2011-04-15 - lavc 52.120.0 - avcodec.h
+  AVPacket structure got additional members for passing side information:
+    4de339e introduce side information for AVPacket
+    2d8591c make containers pass palette change in AVPacket
+
+2011-04-12 - lavf 52.107.0 - avio.h
+  Avio cleanup, part II - deprecate the entire URLContext API:
+    175389c add avio_check as a replacement for url_exist
+    ff1ec0c add avio_pause and avio_seek_time as replacements
+            for _av_url_read_fseek/fpause
+    cdc6a87 deprecate av_protocol_next(), avio_enum_protocols
+            should be used instead.
+    80c6e23 rename url_set_interrupt_cb->avio_set_interrupt_cb.
+    f87b1b3 rename open flags: URL_* -> AVIO_*
+    f8270bb add avio_enum_protocols.
+    5593f03 deprecate URLProtocol.
+    c486dad deprecate URLContext.
+    026e175 deprecate the typedef for URLInterruptCB
+    8e76a19 deprecate av_register_protocol2.
+    b840484 deprecate URL_PROTOCOL_FLAG_NESTED_SCHEME
+    1305d93 deprecate av_url_read_seek
+    fa104e1 deprecate av_url_read_pause
+    727c7aa deprecate url_get_filename().
+    5958df3 deprecate url_max_packet_size().
+    1869ea0 deprecate url_get_file_handle().
+    32a97d4 deprecate url_filesize().
+    e52a914 deprecate url_close().
+    58a48c6 deprecate url_seek().
+    925e908 deprecate url_write().
+    dce3756 deprecate url_read_complete().
+    bc371ac deprecate url_read().
+    0589da0 deprecate url_open().
+    62eaaea deprecate url_connect.
+    5652bb9 deprecate url_alloc.
+    333e894 deprecate url_open_protocol
+    e230705 deprecate url_poll and URLPollEntry
+
+2011-04-10 - lavu  50.40.0 - pixfmt.h
+  Add PIX_FMT_BGR48LE and PIX_FMT_BGR48BE pixel formats
+
+2011-04-08 - lavf 52.106.0 - avformat.h
+  Minor avformat.h cleanup:
+    a9bf9d8 deprecate av_guess_image2_codec
+    c3675df rename avf_sdp_create->av_sdp_create
 
 2011-04-03 - lavf 52.105.0 - avio.h
   Large-scale renaming/deprecating of AVIOContext-related functions:

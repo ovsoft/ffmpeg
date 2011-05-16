@@ -72,7 +72,7 @@ library:
     @tab Multimedia format used by Delphine Software games.
 @item CD+G                      @tab   @tab X
     @tab Video format used by CD+G karaoke disks
-@item Core Audio Format         @tab   @tab X
+@item Core Audio Format         @tab X @tab X
     @tab Apple Core Audio Format
 @item CRC testing format        @tab X @tab
 @item Creative Voice            @tab X @tab X
@@ -96,7 +96,7 @@ library:
     @tab Only embedded audio is decoded.
 @item FLI/FLC/FLX animation     @tab   @tab X
     @tab .fli/.flc files
-@item Flash Video (FLV)         @tab   @tab X
+@item Flash Video (FLV)         @tab X @tab X
     @tab Macromedia Flash video files
 @item framecrc testing format   @tab X @tab
 @item FunCom ISS                @tab   @tab X
@@ -162,6 +162,7 @@ library:
 @item NUT                       @tab X @tab X
     @tab NUT Open Container Format
 @item Ogg                       @tab X @tab X
+@item Playstation Portable PMP  @tab   @tab X
 @item TechnoTrend PVA           @tab   @tab X
     @tab Used by TechnoTrend DVB PCI boards.
 @item QCP                       @tab   @tab X
@@ -258,6 +259,8 @@ library:
     @tab Multimedia format used in Westwood Studios games.
 @item Westwood Studios VQA      @tab   @tab X
     @tab Multimedia format used in Westwood Studios games.
+@item xWMA                      @tab   @tab X
+    @tab Microsoft audio container used by XAudio 2.
 @item YUV4MPEG pipe             @tab X @tab X
 @item Psygnosis YOP             @tab   @tab X
 @end multitable
@@ -398,6 +401,7 @@ following image formats are supported:
     @tab experimental lossless codec (fourcc: FFV1)
 @item Flash Screen Video v1  @tab  X  @tab  X
     @tab fourcc: FSV1
+@item Flash Screen Video v2  @tab  X
 @item Flash Video (FLV)      @tab  X  @tab  X
     @tab Sorenson H.263 used in Flash
 @item Fraps                  @tab     @tab  X
@@ -443,6 +447,7 @@ following image formats are supported:
 @item Miro VideoXL           @tab     @tab  X
     @tab fourcc: VIXL
 @item MJPEG (Motion JPEG)    @tab  X  @tab  X
+@item Mobotix MxPEG video    @tab     @tab  X
 @item Motion Pixels video    @tab     @tab  X
 @item MPEG-1 video           @tab  X  @tab  X
 @item MPEG-1/2 video XvMC (X-Video Motion Compensation)  @tab     @tab  X
@@ -539,7 +544,7 @@ following image formats are supported:
 @item Name @tab Encoding @tab Decoding @tab Comments
 @item 8SVX audio             @tab     @tab  X
 @item AAC                    @tab  E  @tab  X
-    @tab encoding supported through external library libfaac
+    @tab encoding supported through external library libfaac and libvo-aacenc
 @item AC-3                   @tab IX  @tab  X
 @item ADPCM 4X Movie         @tab     @tab  X
 @item ADPCM CDROM XA         @tab     @tab  X
@@ -587,18 +592,21 @@ following image formats are supported:
 @item ADPCM Yamaha           @tab  X  @tab  X
 @item AMR-NB                 @tab  E  @tab  X
     @tab encoding supported through external library libopencore-amrnb
-@item AMR-WB                 @tab     @tab  X
+@item AMR-WB                 @tab  E  @tab  X
+    @tab encoding supported through external library libvo-amrwbenc
 @item Apple lossless audio   @tab  X  @tab  X
     @tab QuickTime fourcc 'alac'
 @item Atrac 1                @tab     @tab  X
 @item Atrac 3                @tab     @tab  X
 @item Bink Audio             @tab     @tab  X
     @tab Used in Bink and Smacker files in many games.
+@item CELT (Opus)            @tab     @tab  E
+    @tab decoding supported through external library libcelt
 @item Delphine Software International CIN audio  @tab     @tab  X
     @tab Codec used in Delphine Software International games.
 @item COOK                   @tab     @tab  X
     @tab All versions except 5.1 are supported.
-@item DCA (DTS Coherent Acoustics)  @tab     @tab  X
+@item DCA (DTS Coherent Acoustics)  @tab  X  @tab  X
 @item DPCM id RoQ            @tab  X  @tab  X
     @tab Used in Quake III, Jedi Knight 2, other computer games.
 @item DPCM Interplay         @tab     @tab  X
@@ -669,6 +677,7 @@ following image formats are supported:
 @item Sierra VMD audio       @tab     @tab  X
     @tab Used in Sierra VMD files.
 @item Smacker audio          @tab     @tab  X
+@item SMPTE 302M AES3 audio  @tab     @tab  X
 @item Sonic                  @tab  X  @tab  X
     @tab experimental codec
 @item Sonic lossless         @tab  X  @tab  X
@@ -784,14 +793,6 @@ to configure.
 
 BSD make will not build FFmpeg, you need to install and use GNU Make
 (@file{gmake}).
-
-@subsubsection FreeBSD
-
-FreeBSD will not compile out-of-the-box due to broken system headers.
-Passing @code{--extra-cflags=-D__BSD_VISIBLE} to configure will work
-around the problem. This may have unexpected sideeffects, so use it at
-your own risk. If you care about FreeBSD, please make an attempt at
-getting the system headers fixed.
 
 @subsection (Open)Solaris
 

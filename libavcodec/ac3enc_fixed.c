@@ -36,7 +36,7 @@
  */
 static av_cold void mdct_end(AC3MDCTContext *mdct)
 {
-    ff_fft_end(&mdct->fft);
+    ff_mdct_end(&mdct->fft);
 }
 
 
@@ -47,7 +47,7 @@ static av_cold void mdct_end(AC3MDCTContext *mdct)
 static av_cold int mdct_init(AVCodecContext *avctx, AC3MDCTContext *mdct,
                              int nbits)
 {
-    int ret = ff_mdct_init(&mdct->fft, nbits, 0, 1.0);
+    int ret = ff_mdct_init(&mdct->fft, nbits, 0, -1.0);
     mdct->window = ff_ac3_window;
     return ret;
 }
@@ -121,5 +121,5 @@ AVCodec ff_ac3_fixed_encoder = {
     .sample_fmts = (const enum AVSampleFormat[]){AV_SAMPLE_FMT_S16,AV_SAMPLE_FMT_NONE},
     .long_name = NULL_IF_CONFIG_SMALL("ATSC A/52A (AC-3)"),
     .priv_class = &ac3enc_class,
-    .channel_layouts = ac3_channel_layouts,
+    .channel_layouts = ff_ac3_channel_layouts,
 };

@@ -61,6 +61,7 @@ const PixelFormatTag ff_raw_pix_fmt_tags[] = {
     { PIX_FMT_UYVY422, MKTAG('A', 'V', '1', 'x') }, /* Avid 1:1x */
     { PIX_FMT_UYVY422, MKTAG('A', 'V', 'u', 'p') },
     { PIX_FMT_UYVY422, MKTAG('V', 'D', 'T', 'Z') }, /* SoftLab-NSK VideoTizer */
+    { PIX_FMT_UYVY422, MKTAG('a', 'u', 'v', '2') },
     { PIX_FMT_UYYVYY411, MKTAG('Y', '4', '1', '1') },
     { PIX_FMT_GRAY8,   MKTAG('G', 'R', 'E', 'Y') },
     { PIX_FMT_NV12,    MKTAG('N', 'V', '1', '2') },
@@ -113,7 +114,7 @@ const PixelFormatTag ff_raw_pix_fmt_tags[] = {
     { PIX_FMT_YUV444P16LE, MKTAG('Y', '3',  0 , 16 ) },
     { PIX_FMT_YUV444P16BE, MKTAG(16 ,  0 , '3', 'Y') },
     { PIX_FMT_YUVA420P,    MKTAG('Y', '4', 11 ,  8 ) },
-    { PIX_FMT_Y400A,       MKTAG('Y', '2',  0 ,  8 ) },
+    { PIX_FMT_GRAY8A,      MKTAG('Y', '2',  0 ,  8 ) },
 
     /* quicktime */
     { PIX_FMT_UYVY422, MKTAG('2', 'v', 'u', 'y') },
@@ -121,6 +122,7 @@ const PixelFormatTag ff_raw_pix_fmt_tags[] = {
     { PIX_FMT_UYVY422, MKTAG('A', 'V', 'U', 'I') }, /* FIXME merge both fields */
     { PIX_FMT_YUYV422, MKTAG('y', 'u', 'v', '2') },
     { PIX_FMT_YUYV422, MKTAG('y', 'u', 'v', 's') },
+    { PIX_FMT_YUYV422, MKTAG('D', 'V', 'O', 'O') }, /* Digital Voodoo SD 8 Bit */
     { PIX_FMT_PAL8,    MKTAG('W', 'R', 'A', 'W') },
     { PIX_FMT_RGB555LE,MKTAG('L', '5', '5', '5') },
     { PIX_FMT_RGB565LE,MKTAG('L', '5', '6', '5') },

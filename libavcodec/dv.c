@@ -1093,9 +1093,10 @@ static int dvvideo_decode_frame(AVCodecContext *avctx,
     if (s->picture.data[0])
         avctx->release_buffer(avctx, &s->picture);
 
+    avcodec_get_frame_defaults(&s->picture);
     s->picture.reference = 0;
     s->picture.key_frame = 1;
-    s->picture.pict_type = FF_I_TYPE;
+    s->picture.pict_type = AV_PICTURE_TYPE_I;
     avctx->pix_fmt   = s->sys->pix_fmt;
     avctx->time_base = s->sys->time_base;
     avcodec_set_dimensions(avctx, s->sys->width, s->sys->height);
@@ -1264,7 +1265,7 @@ static int dvvideo_encode_frame(AVCodecContext *c, uint8_t *buf, int buf_size,
     c->pix_fmt           = s->sys->pix_fmt;
     s->picture           = *((AVFrame *)data);
     s->picture.key_frame = 1;
-    s->picture.pict_type = FF_I_TYPE;
+    s->picture.pict_type = AV_PICTURE_TYPE_I;
 
     s->buf = buf;
     c->execute(c, dv_encode_video_segment, s->sys->work_chunks, NULL,
@@ -1297,6 +1298,7 @@ AVCodec ff_dvvideo_encoder = {
     sizeof(DVVideoContext),
     dvvideo_init_encoder,
     dvvideo_encode_frame,
+    .capabilities = CODEC_CAP_SLICE_THREADS,
     .pix_fmts  = (const enum PixelFormat[]) {PIX_FMT_YUV411P, PIX_FMT_YUV422P, PIX_FMT_YUV420P, PIX_FMT_NONE},
     .long_name = NULL_IF_CONFIG_SMALL("DV (Digital Video)"),
 };
@@ -1312,7 +1314,7 @@ AVCodec ff_dvvideo_decoder = {
     NULL,
     dvvideo_close,
     dvvideo_decode_frame,
-    CODEC_CAP_DR1,
+    CODEC_CAP_DR1 | CODEC_CAP_SLICE_THREADS,
     NULL,
     .max_lowres = 3,
     .long_name = NULL_IF_CONFIG_SMALL("DV (Digital Video)"),

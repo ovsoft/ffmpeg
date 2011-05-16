@@ -84,8 +84,10 @@
 #include <libcrystalhd/libcrystalhd_if.h>
 
 #include "avcodec.h"
+#include "h264.h"
 #include "libavutil/imgutils.h"
 #include "libavutil/intreadwrite.h"
+#include "libavutil/opt.h"
 
 /** Timeout parameter passed to DtsProcOutput() in us */
 #define OUTPUT_PROC_TIMEOUT 50
@@ -102,22 +104,27 @@
  ****************************************************************************/
 
 typedef enum {
-    RET_ERROR          = -1,
-    RET_OK             = 0,
-    RET_COPY_AGAIN     = 1,
-    RET_SKIP_NEXT_COPY = 2,
+    RET_ERROR           = -1,
+    RET_OK              = 0,
+    RET_COPY_AGAIN      = 1,
+    RET_SKIP_NEXT_COPY  = 2,
+    RET_COPY_NEXT_FIELD = 3,
 } CopyRet;
 
 typedef struct OpaqueList {
     struct OpaqueList *next;
     uint64_t fake_timestamp;
     uint64_t reordered_opaque;
+    uint8_t pic_type;
 } OpaqueList;
 
 typedef struct {
+    AVClass *av_class;
     AVCodecContext *avctx;
     AVFrame pic;
     HANDLE dev;
+
+    AVCodecParserContext *parser;
 
     uint8_t is_70012;
     uint8_t *sps_pps_buf;
@@ -132,7 +139,20 @@ typedef struct {
 
     OpaqueList *head;
     OpaqueList *tail;
+
+    /* Options */
+    uint32_t sWidth;
+    uint8_t bframe_bug;
 } CHDContext;
+
+static const AVOption options[] = {
+    { "crystalhd_downscale_width",
+      "Turn on downscaling to the specified width",
+      offsetof(CHDContext, sWidth),
+      FF_OPT_TYPE_INT, 0, 0, UINT32_MAX,
+      AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_DECODING_PARAM, },
+    { NULL, },
+};
 
 
 /*****************************************************************************
@@ -205,7 +225,8 @@ static inline void print_frame_info(CHDContext *priv, BC_DTS_PROC_OUT *output)
  * OpaqueList functions
  ****************************************************************************/
 
-static uint64_t opaque_list_push(CHDContext *priv, uint64_t reordered_opaque)
+static uint64_t opaque_list_push(CHDContext *priv, uint64_t reordered_opaque,
+                                 uint8_t pic_type)
 {
     OpaqueList *newNode = av_mallocz(sizeof (OpaqueList));
     if (!newNode) {
@@ -222,6 +243,7 @@ static uint64_t opaque_list_push(CHDContext *priv, uint64_t reordered_opaque)
     }
     priv->tail = newNode;
     newNode->reordered_opaque = reordered_opaque;
+    newNode->pic_type = pic_type;
 
     return newNode->fake_timestamp;
 }
@@ -230,15 +252,17 @@ static uint64_t opaque_list_push(CHDContext *priv, uint64_t reordered_opaque)
  * The OpaqueList is built in decode order, while elements will be removed
  * in presentation order. If frames are reordered, this means we must be
  * able to remove elements that are not the first element.
+ *
+ * Returned node must be freed by caller.
  */
-static uint64_t opaque_list_pop(CHDContext *priv, uint64_t fake_timestamp)
+static OpaqueList *opaque_list_pop(CHDContext *priv, uint64_t fake_timestamp)
 {
     OpaqueList *node = priv->head;
 
     if (!priv->head) {
         av_log(priv->avctx, AV_LOG_ERROR,
                "CrystalHD: Attempted to query non-existent timestamps.\n");
-        return AV_NOPTS_VALUE;
+        return NULL;
     }
 
     /*
@@ -246,14 +270,13 @@ static uint64_t opaque_list_pop(CHDContext *priv, uint64_t fake_timestamp)
      * the head pointer rather than the previous element in the list.
      */
     if (priv->head->fake_timestamp == fake_timestamp) {
-        uint64_t reordered_opaque = node->reordered_opaque;
         priv->head = node->next;
-        av_free(node);
 
         if (!priv->head->next)
             priv->tail = priv->head;
 
-        return reordered_opaque;
+        node->next = NULL;
+        return node;
     }
 
     /*
@@ -261,24 +284,23 @@ static uint64_t opaque_list_pop(CHDContext *priv, uint64_t fake_timestamp)
      * previous element available to rewrite its next pointer.
      */
     while (node->next) {
-        OpaqueList *next = node->next;
-        if (next->fake_timestamp == fake_timestamp) {
-            uint64_t reordered_opaque = next->reordered_opaque;
-            node->next = next->next;
-            av_free(next);
+        OpaqueList *current = node->next;
+        if (current->fake_timestamp == fake_timestamp) {
+            node->next = current->next;
 
             if (!node->next)
                priv->tail = node;
 
-            return reordered_opaque;
+            current->next = NULL;
+            return current;
         } else {
-            node = next;
+            node = current;
         }
     }
 
     av_log(priv->avctx, AV_LOG_VERBOSE,
            "CrystalHD: Couldn't match fake_timestamp.\n");
-    return AV_NOPTS_VALUE;
+    return NULL;
 }
 
 
@@ -314,6 +336,8 @@ static av_cold int uninit(AVCodecContext *avctx)
     DtsStopDecoder(device);
     DtsCloseDecoder(device);
     DtsDeviceClose(device);
+
+    av_parser_close(priv->parser);
 
     av_free(priv->sps_pps_buf);
 
@@ -425,6 +449,11 @@ static av_cold int init(AVCodecContext *avctx)
     }
     format.mSubtype = subtype;
 
+    if (priv->sWidth) {
+        format.bEnableScaling = 1;
+        format.ScalingParams.sWidth = priv->sWidth;
+    }
+
     /* Get a decoder instance */
     av_log(avctx, AV_LOG_VERBOSE, "CrystalHD: starting up\n");
     // Initialize the Link and Decoder devices
@@ -477,6 +506,13 @@ static av_cold int init(AVCodecContext *avctx)
         goto fail;
     }
 
+    if (avctx->codec->id == CODEC_ID_H264) {
+        priv->parser = av_parser_init(avctx->codec->id);
+        if (!priv->parser)
+            av_log(avctx, AV_LOG_WARNING,
+                   "Cannot open the h.264 parser! Interlaced h.264 content "
+                   "will not be detected reliably.\n");
+    }
     av_log(avctx, AV_LOG_VERBOSE, "CrystalHD: Init complete.\n");
 
     return 0;
@@ -487,35 +523,18 @@ static av_cold int init(AVCodecContext *avctx)
 }
 
 
-/*
- * The CrystalHD doesn't report interlaced H.264 content in a way that allows
- * us to distinguish between specific cases that require different handling.
- * So, for now, we have to hard-code the behaviour we want.
- *
- * The default behaviour is to assume MBAFF with input and output fieldpairs.
- *
- * Define ASSUME_PAFF_OVER_MBAFF to treat input as PAFF with separate input
- * and output fields.
- *
- * Define ASSUME_TWO_INPUTS_ONE_OUTPUT to treat input as separate fields but
- * output as a single fieldpair.
- *
- * Define both to mess up your playback.
- */
-#define ASSUME_PAFF_OVER_MBAFF 0
-#define ASSUME_TWO_INPUTS_ONE_OUTPUT 0
 static inline CopyRet copy_frame(AVCodecContext *avctx,
                                  BC_DTS_PROC_OUT *output,
-                                 void *data, int *data_size,
-                                 uint8_t second_field)
+                                 void *data, int *data_size)
 {
     BC_STATUS ret;
     BC_DTS_STATUS decoder_status;
-    uint8_t is_paff;
-    uint8_t next_frame_same;
+    uint8_t trust_interlaced;
     uint8_t interlaced;
 
     CHDContext *priv = avctx->priv_data;
+    int64_t pkt_pts  = AV_NOPTS_VALUE;
+    uint8_t pic_type = 0;
 
     uint8_t bottom_field = (output->PicInfo.flags & VDEC_FLAG_BOTTOMFIELD) ==
                            VDEC_FLAG_BOTTOMFIELD;
@@ -529,6 +548,29 @@ static inline CopyRet copy_frame(AVCodecContext *avctx,
     uint8_t *dst;
     int dStride;
 
+    if (output->PicInfo.timeStamp != 0) {
+        OpaqueList *node = opaque_list_pop(priv, output->PicInfo.timeStamp);
+        if (node) {
+            pkt_pts = node->reordered_opaque;
+            pic_type = node->pic_type;
+            av_free(node);
+        } else {
+            /*
+             * We will encounter a situation where a timestamp cannot be
+             * popped if a second field is being returned. In this case,
+             * each field has the same timestamp and the first one will
+             * cause it to be popped. To keep subsequent calculations
+             * simple, pic_type should be set a FIELD value - doesn't
+             * matter which, but I chose BOTTOM.
+             */
+            pic_type = PICT_BOTTOM_FIELD;
+        }
+        av_log(avctx, AV_LOG_VERBOSE, "output \"pts\": %"PRIu64"\n",
+               output->PicInfo.timeStamp);
+        av_log(avctx, AV_LOG_VERBOSE, "output picture type %d\n",
+               pic_type);
+    }
+
     ret = DtsGetDriverStatus(priv->dev, &decoder_status);
     if (ret != BC_STS_SUCCESS) {
         av_log(avctx, AV_LOG_ERROR,
@@ -536,17 +578,51 @@ static inline CopyRet copy_frame(AVCodecContext *avctx,
        return RET_ERROR;
     }
 
-    is_paff           = ASSUME_PAFF_OVER_MBAFF ||
-                        !(output->PicInfo.flags & VDEC_FLAG_UNKNOWN_SRC);
-    next_frame_same   = output->PicInfo.picture_number ==
-                        (decoder_status.picNumFlags & ~0x40000000);
-    interlaced        = ((output->PicInfo.flags &
-                          VDEC_FLAG_INTERLACED_SRC) && is_paff) ||
-                         next_frame_same || bottom_field || second_field;
+    /*
+     * For most content, we can trust the interlaced flag returned
+     * by the hardware, but sometimes we can't. These are the
+     * conditions under which we can trust the flag:
+     *
+     * 1) It's not h.264 content
+     * 2) The UNKNOWN_SRC flag is not set
+     * 3) We know we're expecting a second field
+     * 4) The hardware reports this picture and the next picture
+     *    have the same picture number.
+     *
+     * Note that there can still be interlaced content that will
+     * fail this check, if the hardware hasn't decoded the next
+     * picture or if there is a corruption in the stream. (In either
+     * case a 0 will be returned for the next picture number)
+     */
+    trust_interlaced = avctx->codec->id != CODEC_ID_H264 ||
+                       !(output->PicInfo.flags & VDEC_FLAG_UNKNOWN_SRC) ||
+                       priv->need_second_field ||
+                       (decoder_status.picNumFlags & ~0x40000000) ==
+                       output->PicInfo.picture_number;
 
-    av_log(avctx, AV_LOG_VERBOSE, "CrystalHD: next_frame_same: %u | %u | %u\n",
-           next_frame_same, output->PicInfo.picture_number,
-           decoder_status.picNumFlags & ~0x40000000);
+    /*
+     * If we got a false negative for trust_interlaced on the first field,
+     * we will realise our mistake here when we see that the picture number is that
+     * of the previous picture. We cannot recover the frame and should discard the
+     * second field to keep the correct number of output frames.
+     */
+    if (output->PicInfo.picture_number == priv->last_picture && !priv->need_second_field) {
+        av_log(avctx, AV_LOG_WARNING,
+               "Incorrectly guessed progressive frame. Discarding second field\n");
+        /* Returning without providing a picture. */
+        return RET_OK;
+    }
+
+    interlaced = (output->PicInfo.flags & VDEC_FLAG_INTERLACED_SRC) &&
+                 trust_interlaced;
+
+    if (!trust_interlaced && (decoder_status.picNumFlags & ~0x40000000) == 0) {
+        av_log(avctx, AV_LOG_VERBOSE,
+               "Next picture number unknown. Assuming progressive frame.\n");
+    }
+
+    av_log(avctx, AV_LOG_VERBOSE, "Interlaced state: %d | trust_interlaced %d\n",
+           interlaced, trust_interlaced);
 
     if (priv->pic.data[0] && !priv->need_second_field)
         avctx->release_buffer(avctx, &priv->pic);
@@ -607,30 +683,38 @@ static inline CopyRet copy_frame(AVCodecContext *avctx,
     if (interlaced)
         priv->pic.top_field_first = !bottom_first;
 
-    if (output->PicInfo.timeStamp != 0) {
-        priv->pic.pkt_pts = opaque_list_pop(priv, output->PicInfo.timeStamp);
-        av_log(avctx, AV_LOG_VERBOSE, "output \"pts\": %"PRIu64"\n",
-               priv->pic.pkt_pts);
-    }
+    priv->pic.pkt_pts = pkt_pts;
 
     if (!priv->need_second_field) {
         *data_size       = sizeof(AVFrame);
         *(AVFrame *)data = priv->pic;
     }
 
-    if (ASSUME_TWO_INPUTS_ONE_OUTPUT &&
-        output->PicInfo.flags & VDEC_FLAG_UNKNOWN_SRC) {
+    /*
+     * Two types of PAFF content have been observed. One form causes the
+     * hardware to return a field pair and the other individual fields,
+     * even though the input is always individual fields. We must skip
+     * copying on the next decode() call to maintain pipeline length in
+     * the first case.
+     */
+    if (!interlaced && (output->PicInfo.flags & VDEC_FLAG_UNKNOWN_SRC) &&
+        (pic_type == PICT_TOP_FIELD || pic_type == PICT_BOTTOM_FIELD)) {
         av_log(priv->avctx, AV_LOG_VERBOSE, "Fieldpair from two packets.\n");
         return RET_SKIP_NEXT_COPY;
     }
 
-    return RET_OK;
+    /*
+     * Testing has shown that in all cases where we don't want to return the
+     * full frame immediately, VDEC_FLAG_UNKNOWN_SRC is set.
+     */
+    return priv->need_second_field &&
+           !(output->PicInfo.flags & VDEC_FLAG_UNKNOWN_SRC) ?
+           RET_COPY_NEXT_FIELD : RET_OK;
 }
 
 
 static inline CopyRet receive_frame(AVCodecContext *avctx,
-                                    void *data, int *data_size,
-                                    uint8_t second_field)
+                                    void *data, int *data_size)
 {
     BC_STATUS ret;
     BC_DTS_PROC_OUT output = {
@@ -661,7 +745,7 @@ static inline CopyRet receive_frame(AVCodecContext *avctx,
             }
 
             if (avctx->codec->id == CODEC_ID_MPEG4 &&
-                output.PicInfo.timeStamp == 0) {
+                output.PicInfo.timeStamp == 0 && priv->bframe_bug) {
                 av_log(avctx, AV_LOG_VERBOSE,
                        "CrystalHD: Not returning packed frame twice.\n");
                 priv->last_picture++;
@@ -687,7 +771,7 @@ static inline CopyRet receive_frame(AVCodecContext *avctx,
                priv->last_picture = output.PicInfo.picture_number - 1;
             }
 
-            copy_ret = copy_frame(avctx, &output, data, data_size, second_field);
+            copy_ret = copy_frame(avctx, &output, data, data_size);
             if (*data_size > 0) {
                 avctx->has_b_frames--;
                 priv->last_picture++;
@@ -723,11 +807,50 @@ static int decode(AVCodecContext *avctx, void *data, int *data_size, AVPacket *a
     CHDContext *priv   = avctx->priv_data;
     HANDLE dev         = priv->dev;
     int len            = avpkt->size;
+    uint8_t pic_type   = 0;
 
     av_log(avctx, AV_LOG_VERBOSE, "CrystalHD: decode_frame\n");
 
+    if (avpkt->size == 7 && !priv->bframe_bug) {
+        /*
+         * The use of a drop frame triggers the bug
+         */
+        av_log(avctx, AV_LOG_INFO,
+               "CrystalHD: Enabling work-around for packed b-frame bug\n");
+        priv->bframe_bug = 1;
+    } else if (avpkt->size == 8 && priv->bframe_bug) {
+        /*
+         * Delay frames don't trigger the bug
+         */
+        av_log(avctx, AV_LOG_INFO,
+               "CrystalHD: Disabling work-around for packed b-frame bug\n");
+        priv->bframe_bug = 0;
+    }
+
     if (len) {
         int32_t tx_free = (int32_t)DtsTxFreeSize(dev);
+
+        if (priv->parser) {
+            uint8_t *pout;
+            int psize;
+            const uint8_t *in_data = avpkt->data;
+            int in_len = len;
+            H264Context *h = priv->parser->priv_data;
+
+            while (in_len) {
+                int index;
+                index = av_parser_parse2(priv->parser, avctx, &pout, &psize,
+                                         in_data, in_len, avctx->pkt->pts,
+                                         avctx->pkt->dts, 0);
+                in_data += index;
+                in_len -= index;
+            }
+            av_log(avctx, AV_LOG_VERBOSE,
+                   "CrystalHD: parser picture type %d\n",
+                   h->s.picture_structure);
+            pic_type = h->s.picture_structure;
+        }
+
         if (len < tx_free - 1024) {
             /*
              * Despite being notionally opaque, either libcrystalhd or
@@ -738,7 +861,7 @@ static int decode(AVCodecContext *avctx, void *data, int *data_size, AVPacket *a
              * avoiding mangling so we need to build a mapping to values
              * we know will not be mangled.
              */
-            uint64_t pts = opaque_list_push(priv, avctx->pkt->pts);
+            uint64_t pts = opaque_list_push(priv, avctx->pkt->pts, pic_type);
             if (!pts) {
                 return AVERROR(ENOMEM);
             }
@@ -805,41 +928,39 @@ static int decode(AVCodecContext *avctx, void *data, int *data_size, AVPacket *a
     }
 
     do {
-        rec_ret = receive_frame(avctx, data, data_size, 0);
-        if (rec_ret == 0 && *data_size == 0) {
-            if (avctx->codec->id == CODEC_ID_H264) {
-                /*
-                 * This case is for when the encoded fields are stored
-                 * separately and we get a separate avpkt for each one. To keep
-                 * the pipeline stable, we should return nothing and wait for
-                 * the next time round to grab the second field.
-                 * H.264 PAFF is an example of this.
-                 */
-                av_log(avctx, AV_LOG_VERBOSE, "Returning after first field.\n");
-                avctx->has_b_frames--;
-            } else {
-                /*
-                 * This case is for when the encoded fields are stored in a
-                 * single avpkt but the hardware returns then separately. Unless
-                 * we grab the second field before returning, we'll slip another
-                 * frame in the pipeline and if that happens a lot, we're sunk.
-                 * So we have to get that second field now.
-                 * Interlaced mpeg2 and vc1 are examples of this.
-                 */
-                av_log(avctx, AV_LOG_VERBOSE, "Trying to get second field.\n");
-                while (1) {
-                    usleep(priv->decode_wait);
-                    ret = DtsGetDriverStatus(dev, &decoder_status);
-                    if (ret == BC_STS_SUCCESS &&
-                        decoder_status.ReadyListCount > 0) {
-                        rec_ret = receive_frame(avctx, data, data_size, 1);
-                        if ((rec_ret == 0 && *data_size > 0) ||
-                            rec_ret == RET_ERROR)
-                            break;
-                    }
+        rec_ret = receive_frame(avctx, data, data_size);
+        if (rec_ret == RET_OK && *data_size == 0) {
+            /*
+             * This case is for when the encoded fields are stored
+             * separately and we get a separate avpkt for each one. To keep
+             * the pipeline stable, we should return nothing and wait for
+             * the next time round to grab the second field.
+             * H.264 PAFF is an example of this.
+             */
+            av_log(avctx, AV_LOG_VERBOSE, "Returning after first field.\n");
+            avctx->has_b_frames--;
+        } else if (rec_ret == RET_COPY_NEXT_FIELD) {
+            /*
+             * This case is for when the encoded fields are stored in a
+             * single avpkt but the hardware returns then separately. Unless
+             * we grab the second field before returning, we'll slip another
+             * frame in the pipeline and if that happens a lot, we're sunk.
+             * So we have to get that second field now.
+             * Interlaced mpeg2 and vc1 are examples of this.
+             */
+            av_log(avctx, AV_LOG_VERBOSE, "Trying to get second field.\n");
+            while (1) {
+                usleep(priv->decode_wait);
+                ret = DtsGetDriverStatus(dev, &decoder_status);
+                if (ret == BC_STS_SUCCESS &&
+                    decoder_status.ReadyListCount > 0) {
+                    rec_ret = receive_frame(avctx, data, data_size);
+                    if ((rec_ret == RET_OK && *data_size > 0) ||
+                        rec_ret == RET_ERROR)
+                        break;
                 }
-                av_log(avctx, AV_LOG_VERBOSE, "CrystalHD: Got second field.\n");
             }
+            av_log(avctx, AV_LOG_VERBOSE, "CrystalHD: Got second field.\n");
         } else if (rec_ret == RET_SKIP_NEXT_COPY) {
             /*
              * Two input packets got turned into a field pair. Gawd.
@@ -863,6 +984,13 @@ static int decode(AVCodecContext *avctx, void *data, int *data_size, AVPacket *a
 
 
 #if CONFIG_H264_CRYSTALHD_DECODER
+static AVClass h264_class = {
+    "h264_crystalhd",
+    av_default_item_name,
+    options,
+    LIBAVUTIL_VERSION_INT,
+};
+
 AVCodec ff_h264_crystalhd_decoder = {
     .name           = "h264_crystalhd",
     .type           = AVMEDIA_TYPE_VIDEO,
@@ -875,10 +1003,18 @@ AVCodec ff_h264_crystalhd_decoder = {
     .flush          = flush,
     .long_name      = NULL_IF_CONFIG_SMALL("H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 (CrystalHD acceleration)"),
     .pix_fmts       = (const enum PixelFormat[]){PIX_FMT_YUYV422, PIX_FMT_NONE},
+    .priv_class     = &h264_class,
 };
 #endif
 
 #if CONFIG_MPEG2_CRYSTALHD_DECODER
+static AVClass mpeg2_class = {
+    "mpeg2_crystalhd",
+    av_default_item_name,
+    options,
+    LIBAVUTIL_VERSION_INT,
+};
+
 AVCodec ff_mpeg2_crystalhd_decoder = {
     .name           = "mpeg2_crystalhd",
     .type           = AVMEDIA_TYPE_VIDEO,
@@ -891,10 +1027,18 @@ AVCodec ff_mpeg2_crystalhd_decoder = {
     .flush          = flush,
     .long_name      = NULL_IF_CONFIG_SMALL("MPEG-2 Video (CrystalHD acceleration)"),
     .pix_fmts       = (const enum PixelFormat[]){PIX_FMT_YUYV422, PIX_FMT_NONE},
+    .priv_class     = &mpeg2_class,
 };
 #endif
 
 #if CONFIG_MPEG4_CRYSTALHD_DECODER
+static AVClass mpeg4_class = {
+    "mpeg4_crystalhd",
+    av_default_item_name,
+    options,
+    LIBAVUTIL_VERSION_INT,
+};
+
 AVCodec ff_mpeg4_crystalhd_decoder = {
     .name           = "mpeg4_crystalhd",
     .type           = AVMEDIA_TYPE_VIDEO,
@@ -907,10 +1051,18 @@ AVCodec ff_mpeg4_crystalhd_decoder = {
     .flush          = flush,
     .long_name      = NULL_IF_CONFIG_SMALL("MPEG-4 Part 2 (CrystalHD acceleration)"),
     .pix_fmts       = (const enum PixelFormat[]){PIX_FMT_YUYV422, PIX_FMT_NONE},
+    .priv_class     = &mpeg4_class,
 };
 #endif
 
 #if CONFIG_MSMPEG4_CRYSTALHD_DECODER
+static AVClass msmpeg4_class = {
+    "msmpeg4_crystalhd",
+    av_default_item_name,
+    options,
+    LIBAVUTIL_VERSION_INT,
+};
+
 AVCodec ff_msmpeg4_crystalhd_decoder = {
     .name           = "msmpeg4_crystalhd",
     .type           = AVMEDIA_TYPE_VIDEO,
@@ -923,10 +1075,18 @@ AVCodec ff_msmpeg4_crystalhd_decoder = {
     .flush          = flush,
     .long_name      = NULL_IF_CONFIG_SMALL("MPEG-4 Part 2 Microsoft variant version 3 (CrystalHD acceleration)"),
     .pix_fmts       = (const enum PixelFormat[]){PIX_FMT_YUYV422, PIX_FMT_NONE},
+    .priv_class     = &msmpeg4_class,
 };
 #endif
 
 #if CONFIG_VC1_CRYSTALHD_DECODER
+static AVClass vc1_class = {
+    "vc1_crystalhd",
+    av_default_item_name,
+    options,
+    LIBAVUTIL_VERSION_INT,
+};
+
 AVCodec ff_vc1_crystalhd_decoder = {
     .name           = "vc1_crystalhd",
     .type           = AVMEDIA_TYPE_VIDEO,
@@ -939,10 +1099,18 @@ AVCodec ff_vc1_crystalhd_decoder = {
     .flush          = flush,
     .long_name      = NULL_IF_CONFIG_SMALL("SMPTE VC-1 (CrystalHD acceleration)"),
     .pix_fmts       = (const enum PixelFormat[]){PIX_FMT_YUYV422, PIX_FMT_NONE},
+    .priv_class     = &vc1_class,
 };
 #endif
 
 #if CONFIG_WMV3_CRYSTALHD_DECODER
+static AVClass wmv3_class = {
+    "wmv3_crystalhd",
+    av_default_item_name,
+    options,
+    LIBAVUTIL_VERSION_INT,
+};
+
 AVCodec ff_wmv3_crystalhd_decoder = {
     .name           = "wmv3_crystalhd",
     .type           = AVMEDIA_TYPE_VIDEO,
@@ -955,5 +1123,6 @@ AVCodec ff_wmv3_crystalhd_decoder = {
     .flush          = flush,
     .long_name      = NULL_IF_CONFIG_SMALL("Windows Media Video 9 (CrystalHD acceleration)"),
     .pix_fmts       = (const enum PixelFormat[]){PIX_FMT_YUYV422, PIX_FMT_NONE},
+    .priv_class     = &wmv3_class,
 };
 #endif

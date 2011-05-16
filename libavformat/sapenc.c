@@ -146,7 +146,7 @@ static int sap_write_header(AVFormatContext *s)
                     "?ttl=%d", ttl);
         if (!same_port)
             base_port += 2;
-        ret = ffurl_open(&fd, url, URL_WRONLY);
+        ret = ffurl_open(&fd, url, AVIO_FLAG_WRITE);
         if (ret) {
             ret = AVERROR(EIO);
             goto fail;
@@ -158,7 +158,7 @@ static int sap_write_header(AVFormatContext *s)
 
     ff_url_join(url, sizeof(url), "udp", NULL, announce_addr, port,
                 "?ttl=%d&connect=1", ttl);
-    ret = ffurl_open(&sap->ann_fd, url, URL_WRONLY);
+    ret = ffurl_open(&sap->ann_fd, url, AVIO_FLAG_WRITE);
     if (ret) {
         ret = AVERROR(EIO);
         goto fail;
@@ -208,7 +208,7 @@ static int sap_write_header(AVFormatContext *s)
     av_strlcpy(&sap->ann[pos], "application/sdp", sap->ann_size - pos);
     pos += strlen(&sap->ann[pos]) + 1;
 
-    if (avf_sdp_create(contexts, s->nb_streams, &sap->ann[pos],
+    if (av_sdp_create(contexts, s->nb_streams, &sap->ann[pos],
                        sap->ann_size - pos)) {
         ret = AVERROR_INVALIDDATA;
         goto fail;

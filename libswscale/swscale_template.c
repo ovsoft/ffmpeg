@@ -951,7 +951,7 @@ static inline void RENAME(yuv2yuv1)(SwsContext *c, const int16_t *lumSrc, const 
 #if COMPILE_TEMPLATE_MMX
     if(!(c->flags & SWS_BITEXACT)) {
         long p= 4;
-        const uint8_t *src[4]= {alpSrc + dstW, lumSrc + dstW, chrSrc + chrDstW, chrSrc + VOFW + chrDstW};
+        const int16_t *src[4]= {alpSrc + dstW, lumSrc + dstW, chrSrc + chrDstW, chrSrc + VOFW + chrDstW};
         uint8_t *dst[4]= {aDest, dest, uDest, vDest};
         x86_reg counter[4]= {dstW, dstW, chrDstW, chrDstW};
 
@@ -1233,8 +1233,8 @@ static inline void RENAME(yuv2packed2)(SwsContext *c, const uint16_t *buf0, cons
                     : "%r8"
                 );
 #else
-                *(const uint16_t **)(&c->u_temp)=abuf0;
-                *(const uint16_t **)(&c->v_temp)=abuf1;
+                c->u_temp=(intptr_t)abuf0;
+                c->v_temp=(intptr_t)abuf1;
                 __asm__ volatile(
                     "mov %%"REG_b", "ESP_OFFSET"(%5)        \n\t"
                     "mov        %4, %%"REG_b"               \n\t"
@@ -1678,6 +1678,8 @@ static inline void RENAME(LEToUV)(uint8_t *dstU, uint8_t *dstV, const uint8_t *s
     );
 #else
     int i;
+    // FIXME I don't think this code is right for YUV444/422, since then h is not subsampled so
+    // we need to skip each second pixel. Same for BEToUV.
     for (i=0; i<width; i++) {
         dstU[i]= src1[2*i + 1];
         dstV[i]= src2[2*i + 1];
@@ -1825,6 +1827,33 @@ static inline void RENAME(nv21ToUV)(uint8_t *dstU, uint8_t *dstV,
 {
     RENAME(nvXXtoUV)(dstV, dstU, src1, width);
 }
+
+// FIXME Maybe dither instead.
+#ifndef YUV_NBPS
+#define YUV_NBPS(depth, endianness, rfunc) \
+static inline void endianness ## depth ## ToUV_c(uint8_t *dstU, uint8_t *dstV, \
+                                          const uint16_t *srcU, const uint16_t *srcV, \
+                                          long width, uint32_t *unused) \
+{ \
+    int i; \
+    for (i = 0; i < width; i++) { \
+        dstU[i] = rfunc(&srcU[i])>>(depth-8); \
+        dstV[i] = rfunc(&srcV[i])>>(depth-8); \
+    } \
+} \
+\
+static inline void endianness ## depth ## ToY_c(uint8_t *dstY, const uint16_t *srcY, long width, uint32_t *unused) \
+{ \
+    int i; \
+    for (i = 0; i < width; i++) \
+        dstY[i] = rfunc(&srcY[i])>>(depth-8); \
+} \
+
+YUV_NBPS( 9, LE, AV_RL16)
+YUV_NBPS( 9, BE, AV_RB16)
+YUV_NBPS(10, LE, AV_RL16)
+YUV_NBPS(10, BE, AV_RB16)
+#endif // YUV_NBPS
 
 #if COMPILE_TEMPLATE_MMX
 static inline void RENAME(bgr24ToY_mmx)(uint8_t *dst, const uint8_t *src, long width, enum PixelFormat srcFormat)
@@ -2383,7 +2412,7 @@ static inline void RENAME(hyscale)(SwsContext *c, uint16_t *dst, long dstWidth, 
                                    uint32_t *pal, int isAlpha)
 {
     void (*toYV12)(uint8_t *, const uint8_t *, long, uint32_t *) = isAlpha ? c->alpToYV12 : c->lumToYV12;
-    void (*convertRange)(uint16_t *, int) = isAlpha ? NULL : c->lumConvertRange;
+    void (*convertRange)(int16_t *, int) = isAlpha ? NULL : c->lumConvertRange;
 
     src += isAlpha ? c->alpSrcOffset : c->lumSrcOffset;
 
@@ -2794,7 +2823,7 @@ static int RENAME(swScale)(SwsContext *c, const uint8_t* src[], int srcStride[],
             } else if (isPlanarYUV(dstFormat) || dstFormat==PIX_FMT_GRAY8) { //YV12 like
                 const int chrSkipMask= (1<<c->chrDstVSubSample)-1;
                 if ((dstY&chrSkipMask) || isGray(dstFormat)) uDest=vDest= NULL; //FIXME split functions in lumi / chromi
-                if (is16BPS(dstFormat)) {
+                if (is16BPS(dstFormat) || isNBPS(dstFormat)) {
                     yuv2yuvX16inC(
                                   vLumFilter+dstY*vLumFilterSize   , lumSrcPtr, vLumFilterSize,
                                   vChrFilter+chrDstY*vChrFilterSize, chrSrcPtr, vChrFilterSize,
@@ -2871,7 +2900,7 @@ static int RENAME(swScale)(SwsContext *c, const uint8_t* src[], int srcStride[],
             } else if (isPlanarYUV(dstFormat) || dstFormat==PIX_FMT_GRAY8) { //YV12
                 const int chrSkipMask= (1<<c->chrDstVSubSample)-1;
                 if ((dstY&chrSkipMask) || isGray(dstFormat)) uDest=vDest= NULL; //FIXME split functions in lumi / chromi
-                if (is16BPS(dstFormat)) {
+                if (is16BPS(dstFormat) || isNBPS(dstFormat)) {
                     yuv2yuvX16inC(
                                   vLumFilter+dstY*vLumFilterSize   , lumSrcPtr, vLumFilterSize,
                                   vChrFilter+chrDstY*vChrFilterSize, chrSrcPtr, vChrFilterSize,
@@ -2955,6 +2984,12 @@ static void RENAME(sws_init_swScale)(SwsContext *c)
         case PIX_FMT_PAL8     :
         case PIX_FMT_BGR4_BYTE:
         case PIX_FMT_RGB4_BYTE: c->chrToYV12 = palToUV; break;
+        case PIX_FMT_YUV420P9BE: c->chrToYV12 = BE9ToUV_c; break;
+        case PIX_FMT_YUV420P9LE: c->chrToYV12 = LE9ToUV_c; break;
+        case PIX_FMT_YUV422P10BE:
+        case PIX_FMT_YUV420P10BE: c->chrToYV12 = BE10ToUV_c; break;
+        case PIX_FMT_YUV422P10LE:
+        case PIX_FMT_YUV420P10LE: c->chrToYV12 = LE10ToUV_c; break;
         case PIX_FMT_YUV420P16BE:
         case PIX_FMT_YUV422P16BE:
         case PIX_FMT_YUV444P16BE: c->chrToYV12 = RENAME(BEToUV); break;
@@ -3001,11 +3036,17 @@ static void RENAME(sws_init_swScale)(SwsContext *c)
     c->lumToYV12 = NULL;
     c->alpToYV12 = NULL;
     switch (srcFormat) {
+    case PIX_FMT_YUV420P9BE: c->lumToYV12 = BE9ToY_c; break;
+    case PIX_FMT_YUV420P9LE: c->lumToYV12 = LE9ToY_c; break;
+    case PIX_FMT_YUV422P10BE:
+    case PIX_FMT_YUV420P10BE: c->lumToYV12 = BE10ToY_c; break;
+    case PIX_FMT_YUV422P10LE:
+    case PIX_FMT_YUV420P10LE: c->lumToYV12 = LE10ToY_c; break;
     case PIX_FMT_YUYV422  :
     case PIX_FMT_YUV420P16BE:
     case PIX_FMT_YUV422P16BE:
     case PIX_FMT_YUV444P16BE:
-    case PIX_FMT_Y400A    :
+    case PIX_FMT_GRAY8A   :
     case PIX_FMT_GRAY16BE : c->lumToYV12 = RENAME(yuy2ToY); break;
     case PIX_FMT_UYVY422  :
     case PIX_FMT_YUV420P16LE:
@@ -3040,12 +3081,13 @@ static void RENAME(sws_init_swScale)(SwsContext *c)
         case PIX_FMT_RGB32_1:
         case PIX_FMT_BGR32  :
         case PIX_FMT_BGR32_1: c->alpToYV12 = abgrToA; break;
-        case PIX_FMT_Y400A  : c->alpToYV12 = RENAME(yuy2ToY); break;
+        case PIX_FMT_GRAY8A : c->alpToYV12 = RENAME(yuy2ToY); break;
+        case PIX_FMT_PAL8   : c->alpToYV12 = palToA; break;
         }
     }
 
     switch (srcFormat) {
-    case PIX_FMT_Y400A  :
+    case PIX_FMT_GRAY8A :
         c->alpSrcOffset = 1;
         break;
     case PIX_FMT_RGB32  :

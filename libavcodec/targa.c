@@ -171,13 +171,6 @@ static int decode_frame(AVCodecContext *avctx,
         stride = -p->linesize[0];
     }
 
-    if(avctx->pix_fmt == PIX_FMT_PAL8 && avctx->palctrl){
-        memcpy(p->data[1], avctx->palctrl->palette, AVPALETTE_SIZE);
-        if(avctx->palctrl->palette_changed){
-            p->palette_has_changed = 1;
-            avctx->palctrl->palette_changed = 0;
-        }
-    }
     if(colors){
         size_t pal_size;
         if((colors + first_clr) > 256){
@@ -196,10 +189,10 @@ static int decode_frame(AVCodecContext *avctx,
             int r, g, b, t;
             int32_t *pal = ((int32_t*)p->data[1]) + first_clr;
             for(t = 0; t < colors; t++){
-                r = *buf++;
-                g = *buf++;
                 b = *buf++;
-                *pal++ = (b << 16) | (g << 8) | r;
+                g = *buf++;
+                r = *buf++;
+                *pal++ = (0xff<<24) | (r << 16) | (g << 8) | b;
             }
             p->palette_has_changed = 1;
         }

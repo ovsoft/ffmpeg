@@ -32,9 +32,11 @@
 #include "aacsbrdata.h"
 #include "fft.h"
 #include "aacps.h"
+#include "libavutil/libm.h"
 
 #include <stdint.h>
 #include <float.h>
+#include <math.h>
 
 #define ENVELOPE_ADJUSTMENT_OFFSET 2
 #define NOISE_FLOOR_OFFSET 6.0f

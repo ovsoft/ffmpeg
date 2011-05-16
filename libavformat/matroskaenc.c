@@ -403,8 +403,6 @@ static int64_t mkv_write_cues(AVIOContext *pb, mkv_cues *cues, int num_tracks)
     }
     end_ebml_master(pb, cues_element);
 
-    av_free(cues->entries);
-    av_free(cues);
     return currentpos;
 }
 
@@ -618,7 +616,7 @@ static int mkv_write_tracks(AVFormatContext *s)
                 put_ebml_uint(pb, MATROSKA_ID_TRACKTYPE, MATROSKA_TRACK_TYPE_SUBTITLE);
                 if (!native_id) {
                     av_log(s, AV_LOG_ERROR, "Subtitle codec %d is not supported.\n", codec->codec_id);
-                    return AVERROR_NOTSUPP;
+                    return AVERROR(ENOSYS);
                 }
                 break;
             default:
@@ -1144,10 +1142,13 @@ static int mkv_write_trailer(AVFormatContext *s)
     }
 
     if (pb->seekable) {
-        cuespos = mkv_write_cues(pb, mkv->cues, s->nb_streams);
+        if (mkv->cues->num_entries) {
+            cuespos = mkv_write_cues(pb, mkv->cues, s->nb_streams);
 
-        ret = mkv_add_seekhead_entry(mkv->main_seekhead, MATROSKA_ID_CUES    , cuespos);
-        if (ret < 0) return ret;
+            ret = mkv_add_seekhead_entry(mkv->main_seekhead, MATROSKA_ID_CUES, cuespos);
+            if (ret < 0) return ret;
+        }
+
         mkv_write_seekhead(pb, mkv->main_seekhead);
 
         // update the duration
@@ -1161,6 +1162,8 @@ static int mkv_write_trailer(AVFormatContext *s)
 
     end_ebml_master(pb, mkv->segment);
     av_free(mkv->tracks);
+    av_freep(&mkv->cues->entries);
+    av_freep(&mkv->cues);
     av_destruct_packet(&mkv->cur_audio_pkt);
     avio_flush(pb);
     return 0;

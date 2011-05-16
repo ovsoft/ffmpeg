@@ -29,10 +29,7 @@
 #include "avutil.h"
 #include "log.h"
 
-#if LIBAVUTIL_VERSION_MAJOR > 50
-static
-#endif
-int av_log_level = AV_LOG_INFO;
+static int av_log_level = AV_LOG_INFO;
 static int flags;
 
 #if defined(_WIN32) && !defined(__MINGW32CE__)
@@ -103,7 +100,7 @@ void av_log_default_callback(void* ptr, int level, const char* fmt, va_list vl)
     line[0]=0;
 #undef fprintf
     if(print_prefix && avc) {
-        if(avc->version >= (50<<16 | 15<<8 | 3) && avc->parent_log_context_offset){
+        if (avc->parent_log_context_offset) {
             AVClass** parent= *(AVClass***)(((uint8_t*)ptr) + avc->parent_log_context_offset);
             if(parent && *parent){
                 snprintf(line, sizeof(line), "[%s @ %p] ", (*parent)->item_name(parent), parent);
@@ -114,7 +111,7 @@ void av_log_default_callback(void* ptr, int level, const char* fmt, va_list vl)
 
     vsnprintf(line + strlen(line), sizeof(line) - strlen(line), fmt, vl);
 
-    print_prefix= line[strlen(line)-1] == '\n';
+    print_prefix = strlen(line) && line[strlen(line)-1] == '\n';
 
 #if HAVE_ISATTY
     if(!is_atty) is_atty= isatty(2) ? 1 : -1;

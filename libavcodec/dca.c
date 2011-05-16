@@ -321,16 +321,16 @@ typedef struct {
 
     /* Subband samples history (for ADPCM) */
     float subband_samples_hist[DCA_PRIM_CHANNELS_MAX][DCA_SUBBANDS][4];
-    DECLARE_ALIGNED(16, float, subband_fir_hist)[DCA_PRIM_CHANNELS_MAX][512];
-    DECLARE_ALIGNED(16, float, subband_fir_noidea)[DCA_PRIM_CHANNELS_MAX][32];
+    DECLARE_ALIGNED(32, float, subband_fir_hist)[DCA_PRIM_CHANNELS_MAX][512];
+    DECLARE_ALIGNED(32, float, subband_fir_noidea)[DCA_PRIM_CHANNELS_MAX][32];
     int hist_index[DCA_PRIM_CHANNELS_MAX];
-    DECLARE_ALIGNED(16, float, raXin)[32];
+    DECLARE_ALIGNED(32, float, raXin)[32];
 
     int output;                 ///< type of output
     float scale_bias;           ///< output scale
 
-    DECLARE_ALIGNED(16, float, subband_samples)[DCA_BLOCKS_MAX][DCA_PRIM_CHANNELS_MAX][DCA_SUBBANDS][8];
-    DECLARE_ALIGNED(16, float, samples)[(DCA_PRIM_CHANNELS_MAX+1)*256];
+    DECLARE_ALIGNED(32, float, subband_samples)[DCA_BLOCKS_MAX][DCA_PRIM_CHANNELS_MAX][DCA_SUBBANDS][8];
+    DECLARE_ALIGNED(32, float, samples)[(DCA_PRIM_CHANNELS_MAX+1)*256];
     const float *samples_chanptr[DCA_PRIM_CHANNELS_MAX+1];
 
     uint8_t dca_buffer[DCA_MAX_FRAME_SIZE + DCA_MAX_EXSS_HEADER_SIZE + DCA_BUFFER_PADDING_SIZE];
@@ -1622,16 +1622,13 @@ static int dca_decode_frame(AVCodecContext * avctx,
 {
     const uint8_t *buf = avpkt->data;
     int buf_size = avpkt->size;
+    int data_size_tmp;
 
     int lfe_samples;
     int num_core_channels = 0;
     int i;
-    /* ffdshow custom code */
-#if CONFIG_AUDIO_FLOAT
-    float *samples = data;
-#else
+    float *samples_flt = data;
     int16_t *samples = data;
-#endif
     DCAContext *s = avctx->priv_data;
     int channels;
     int core_ss_end;
@@ -1796,6 +1793,10 @@ static int dca_decode_frame(AVCodecContext * avctx,
             s->output = DCA_STEREO;
             avctx->channel_layout = AV_CH_LAYOUT_STEREO;
         }
+        else if (avctx->request_channel_layout & AV_CH_LAYOUT_NATIVE) {
+            static const int8_t dca_channel_order_native[9] = { 0, 1, 2, 3, 4, 5, 6, 7, 8 };
+            s->channel_order_tab = dca_channel_order_native;
+        }
     } else {
         av_log(avctx, AV_LOG_ERROR, "Non standard configuration %d !\n",s->amode);
         return -1;
@@ -1817,10 +1818,11 @@ static int dca_decode_frame(AVCodecContext * avctx,
         return -1;
     }
 
-    /* ffdshow custom code */
-    if (*data_size < (s->sample_blocks / 8) * 256 * sizeof(samples[0]) * channels)
+    data_size_tmp = (s->sample_blocks / 8) * 256 * channels;
+    data_size_tmp *= avctx->sample_fmt == AV_SAMPLE_FMT_FLT ? sizeof(*samples_flt) : sizeof(*samples);
+    if (*data_size < data_size_tmp)
         return -1;
-    *data_size = 256 / 8 * s->sample_blocks * sizeof(samples[0]) * channels;
+    *data_size = data_size_tmp;
 
     /* filter to get final output */
     for (i = 0; i < (s->sample_blocks / 8); i++) {
@@ -1840,13 +1842,13 @@ static int dca_decode_frame(AVCodecContext * avctx,
         }
 
         /* interleave samples */
-#if CONFIG_AUDIO_FLOAT
-        /* ffdshow custom code */
-        float_interleave(samples, s->samples_chanptr, 256, channels);
-#else
-        s->fmt_conv.float_to_int16_interleave(samples, s->samples_chanptr, 256, channels);
-#endif
-        samples += 256 * channels;
+        if (avctx->sample_fmt == AV_SAMPLE_FMT_FLT) {
+            float_interleave(samples_flt, s->samples_chanptr, 256, channels);
+            samples_flt += 256 * channels;
+        } else {
+            s->fmt_conv.float_to_int16_interleave(samples, s->samples_chanptr, 256, channels);
+            samples += 256 * channels;
+        }
     }
 
     /* update lfe history */
@@ -1882,12 +1884,8 @@ static av_cold int dca_decode_init(AVCodecContext * avctx)
 
     for (i = 0; i < DCA_PRIM_CHANNELS_MAX+1; i++)
         s->samples_chanptr[i] = s->samples + i * 256;
-    /* ffdshow custom code */
-#if CONFIG_AUDIO_FLOAT
-    avctx->sample_fmt = AV_SAMPLE_FMT_FLT;
-#else
-    avctx->sample_fmt = AV_SAMPLE_FMT_S16;
-#endif
+    avctx->sample_fmt = avctx->request_sample_fmt == AV_SAMPLE_FMT_FLT ?
+                        AV_SAMPLE_FMT_FLT : AV_SAMPLE_FMT_S16;
 
     s->scale_bias = 1.0;
 
