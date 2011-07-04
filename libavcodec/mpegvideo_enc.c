@@ -28,6 +28,7 @@
  */
 
 #include "libavutil/intmath.h"
+#include "libavutil/mathematics.h"
 #include "avcodec.h"
 #include "dsputil.h"
 #include "mpegvideo.h"
@@ -352,7 +353,7 @@ av_cold int MPV_encode_init(AVCodecContext *avctx)
     }
 
     if(avctx->rc_max_rate && avctx->rc_max_rate < avctx->bit_rate){
-        av_log(avctx, AV_LOG_INFO, "bitrate above max bitrate\n");
+        av_log(avctx, AV_LOG_ERROR, "bitrate above max bitrate\n");
         return -1;
     }
 
@@ -582,7 +583,7 @@ av_cold int MPV_encode_init(AVCodecContext *avctx)
     case CODEC_ID_H263:
         if (!CONFIG_H263_ENCODER)  return -1;
         if (ff_match_2uint16(h263_format, FF_ARRAY_ELEMS(h263_format), s->width, s->height) == 8) {
-            av_log(avctx, AV_LOG_INFO, "The specified picture size of %dx%d is not valid for the H.263 codec.\nValid sizes are 128x96, 176x144, 352x288, 704x576, and 1408x1152. Try H.263+.\n", s->width, s->height);
+            av_log(avctx, AV_LOG_ERROR, "The specified picture size of %dx%d is not valid for the H.263 codec.\nValid sizes are 128x96, 176x144, 352x288, 704x576, and 1408x1152. Try H.263+.\n", s->width, s->height);
             return -1;
         }
         s->out_format = FMT_H263;
@@ -638,18 +639,8 @@ av_cold int MPV_encode_init(AVCodecContext *avctx)
         s->low_delay= s->max_b_frames ? 0 : 1;
         avctx->delay= s->low_delay ? 0 : (s->max_b_frames + 1);
         break;
-    case CODEC_ID_MSMPEG4V1:
-        s->out_format = FMT_H263;
-        s->h263_msmpeg4 = 1;
-        s->h263_pred = 1;
-        s->unrestricted_mv = 1;
-        s->msmpeg4_version= 1;
-        avctx->delay=0;
-        s->low_delay=1;
-        break;
     case CODEC_ID_MSMPEG4V2:
         s->out_format = FMT_H263;
-        s->h263_msmpeg4 = 1;
         s->h263_pred = 1;
         s->unrestricted_mv = 1;
         s->msmpeg4_version= 2;
@@ -658,7 +649,6 @@ av_cold int MPV_encode_init(AVCodecContext *avctx)
         break;
     case CODEC_ID_MSMPEG4V3:
         s->out_format = FMT_H263;
-        s->h263_msmpeg4 = 1;
         s->h263_pred = 1;
         s->unrestricted_mv = 1;
         s->msmpeg4_version= 3;
@@ -668,7 +658,6 @@ av_cold int MPV_encode_init(AVCodecContext *avctx)
         break;
     case CODEC_ID_WMV1:
         s->out_format = FMT_H263;
-        s->h263_msmpeg4 = 1;
         s->h263_pred = 1;
         s->unrestricted_mv = 1;
         s->msmpeg4_version= 4;
@@ -678,7 +667,6 @@ av_cold int MPV_encode_init(AVCodecContext *avctx)
         break;
     case CODEC_ID_WMV2:
         s->out_format = FMT_H263;
-        s->h263_msmpeg4 = 1;
         s->h263_pred = 1;
         s->unrestricted_mv = 1;
         s->msmpeg4_version= 5;
@@ -1239,7 +1227,7 @@ int MPV_encode_picture(AVCodecContext *avctx,
 {
     MpegEncContext *s = avctx->priv_data;
     AVFrame *pic_arg = data;
-    int i, stuffing_count, context_count = avctx->active_thread_type&FF_THREAD_SLICE ? avctx->thread_count : 1;
+    int i, stuffing_count, context_count = avctx->thread_count;
 
     for(i=0; i<context_count; i++){
         int start_y= s->thread_context[i]->start_mb_y;
@@ -1800,7 +1788,7 @@ static av_always_inline void encode_mb(MpegEncContext *s, int motion_x, int moti
 static inline void copy_context_before_encode(MpegEncContext *d, MpegEncContext *s, int type){
     int i;
 
-    memcpy(d->last_mv, s->last_mv, 2*2*2*sizeof(int)); //FIXME is memcpy faster then a loop?
+    memcpy(d->last_mv, s->last_mv, 2*2*2*sizeof(int)); //FIXME is memcpy faster than a loop?
 
     /* mpeg1 */
     d->mb_skip_run= s->mb_skip_run;
@@ -1829,7 +1817,7 @@ static inline void copy_context_after_encode(MpegEncContext *d, MpegEncContext *
     int i;
 
     memcpy(d->mv, s->mv, 2*4*2*sizeof(int));
-    memcpy(d->last_mv, s->last_mv, 2*2*2*sizeof(int)); //FIXME is memcpy faster then a loop?
+    memcpy(d->last_mv, s->last_mv, 2*2*2*sizeof(int)); //FIXME is memcpy faster than a loop?
 
     /* mpeg1 */
     d->mb_skip_run= s->mb_skip_run;
@@ -2183,9 +2171,7 @@ static int encode_thread(AVCodecContext *c, void *arg){
                         int d= 100 / s->avctx->error_rate;
                         if(r % d == 0){
                             current_packet_size=0;
-#ifndef ALT_BITSTREAM_WRITER
                             s->pb.buf_ptr= s->ptr_lastgob;
-#endif
                             assert(put_bits_ptr(&s->pb) == s->ptr_lastgob);
                         }
                     }
@@ -2772,7 +2758,7 @@ static int encode_picture(MpegEncContext *s, int picture_number)
 {
     int i;
     int bits;
-    int context_count = s->avctx->active_thread_type&FF_THREAD_SLICE ? s->avctx->thread_count : 1;
+    int context_count = s->avctx->thread_count;
 
     s->picture_number = picture_number;
 
@@ -2782,7 +2768,7 @@ static int encode_picture(MpegEncContext *s, int picture_number)
 
     /* we need to initialize some time vars before we can encode b-frames */
     // RAL: Condition added for MPEG1VIDEO
-    if (s->codec_id == CODEC_ID_MPEG1VIDEO || s->codec_id == CODEC_ID_MPEG2VIDEO || (s->h263_pred && !s->h263_msmpeg4))
+    if (s->codec_id == CODEC_ID_MPEG1VIDEO || s->codec_id == CODEC_ID_MPEG2VIDEO || (s->h263_pred && !s->msmpeg4_version))
         set_frame_distances(s);
     if(CONFIG_MPEG4_ENCODER && s->codec_id == CODEC_ID_MPEG4)
         ff_set_mpeg4_time(s);
@@ -2951,7 +2937,7 @@ static int encode_picture(MpegEncContext *s, int picture_number)
     case FMT_H263:
         if (CONFIG_WMV2_ENCODER && s->codec_id == CODEC_ID_WMV2)
             ff_wmv2_encode_picture_header(s, picture_number);
-        else if (CONFIG_MSMPEG4_ENCODER && s->h263_msmpeg4)
+        else if (CONFIG_MSMPEG4_ENCODER && s->msmpeg4_version)
             msmpeg4_encode_picture_header(s, picture_number);
         else if (CONFIG_MPEG4_ENCODER && s->h263_pred)
             mpeg4_encode_picture_header(s, picture_number);
@@ -3805,18 +3791,6 @@ AVCodec ff_h263p_encoder = {
     .capabilities = CODEC_CAP_SLICE_THREADS,
     .pix_fmts= (const enum PixelFormat[]){PIX_FMT_YUV420P, PIX_FMT_NONE},
     .long_name= NULL_IF_CONFIG_SMALL("H.263+ / H.263-1998 / H.263 version 2"),
-};
-
-AVCodec ff_msmpeg4v1_encoder = {
-    "msmpeg4v1",
-    AVMEDIA_TYPE_VIDEO,
-    CODEC_ID_MSMPEG4V1,
-    sizeof(MpegEncContext),
-    MPV_encode_init,
-    MPV_encode_picture,
-    MPV_encode_end,
-    .pix_fmts= (const enum PixelFormat[]){PIX_FMT_YUV420P, PIX_FMT_NONE},
-    .long_name= NULL_IF_CONFIG_SMALL("MPEG-4 part 2 Microsoft variant version 1"),
 };
 
 AVCodec ff_msmpeg4v2_encoder = {

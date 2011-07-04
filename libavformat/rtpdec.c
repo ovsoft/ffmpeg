@@ -19,6 +19,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "libavutil/mathematics.h"
 #include "libavcodec/get_bits.h"
 #include "avformat.h"
 #include "mpegts.h"
@@ -321,7 +322,7 @@ int rtp_check_and_send_back_rr(RTPDemuxContext *s, int count)
     avio_flush(pb);
     len = avio_close_dyn_buf(pb, &buf);
     if ((len > 0) && buf) {
-        int result;
+        int av_unused result;
         av_dlog(s->ic, "sending %d bytes of RR\n", len);
         result= ffurl_write(s->rtp_ctx, buf, len);
         av_dlog(s->ic, "result from ffurl_write: %d\n", result);

@@ -22,6 +22,7 @@
 #include "libavutil/intreadwrite.h"
 #include "libavutil/imgutils.h"
 #include "avcodec.h"
+#include "bytestream.h"
 #include "targa.h"
 
 typedef struct TargaContext {
@@ -108,7 +109,7 @@ static int decode_frame(AVCodecContext *avctx,
     AVFrame * const p= (AVFrame*)&s->picture;
     uint8_t *dst;
     int stride;
-    int idlen, pal, compr, x, y, w, h, bpp, flags;
+    int idlen, pal, compr, y, w, h, bpp, flags;
     int first_clr, colors, csize;
 
     /* parse image header */
@@ -116,13 +117,18 @@ static int decode_frame(AVCodecContext *avctx,
     idlen = *buf++;
     pal = *buf++;
     compr = *buf++;
-    first_clr = AV_RL16(buf); buf += 2;
-    colors = AV_RL16(buf); buf += 2;
+    first_clr = bytestream_get_le16(&buf);
+    colors = bytestream_get_le16(&buf);
     csize = *buf++;
-    x = AV_RL16(buf); buf += 2;
-    y = AV_RL16(buf); buf += 2;
-    w = AV_RL16(buf); buf += 2;
-    h = AV_RL16(buf); buf += 2;
+    if (!pal && (first_clr || colors || csize)) {
+        av_log(avctx, AV_LOG_WARNING, "File without colormap has colormap information set.\n");
+        // specification says we should ignore those value in this case
+        first_clr = colors = csize = 0;
+    }
+    buf += 2; /* x */
+    y = bytestream_get_le16(&buf);
+    w = bytestream_get_le16(&buf);
+    h = bytestream_get_le16(&buf);
     bpp = *buf++;
     flags = *buf++;
     //skip identifier if any
@@ -186,13 +192,10 @@ static int decode_frame(AVCodecContext *avctx,
         if(avctx->pix_fmt != PIX_FMT_PAL8)//should not occur but skip palette anyway
             buf += pal_size;
         else{
-            int r, g, b, t;
+            int t;
             int32_t *pal = ((int32_t*)p->data[1]) + first_clr;
             for(t = 0; t < colors; t++){
-                b = *buf++;
-                g = *buf++;
-                r = *buf++;
-                *pal++ = (0xff<<24) | (r << 16) | (g << 8) | b;
+                *pal++ = (0xff<<24) | bytestream_get_le24(&buf);
             }
             p->palette_has_changed = 1;
         }
@@ -210,6 +213,7 @@ static int decode_frame(AVCodecContext *avctx,
             CHECK_BUFFER_SIZE(buf, buf_end, img_size, "image data");
             for(y = 0; y < s->height; y++){
 #if HAVE_BIGENDIAN
+                int x;
                 if((s->bpp + 1) >> 3 == 2){
                     uint16_t *dst16 = (uint16_t*)dst;
                     for(x = 0; x < s->width; x++)

@@ -19,6 +19,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "libavutil/mathematics.h"
 #include "libavcodec/avcodec.h"
 #include "avformat.h"
 #include "avio_internal.h"
@@ -171,9 +172,11 @@ const AVCodecTag ff_codec_bmp_tags[] = {
     { CODEC_ID_RAWVIDEO,     MKTAG('y', 'u', 'v', 's') },
     { CODEC_ID_RAWVIDEO,     MKTAG('P', '4', '2', '2') },
     { CODEC_ID_RAWVIDEO,     MKTAG('Y', 'V', '1', '2') },
+    { CODEC_ID_RAWVIDEO,     MKTAG('Y', 'V', '1', '6') },
     { CODEC_ID_RAWVIDEO,     MKTAG('U', 'Y', 'V', 'Y') },
     { CODEC_ID_RAWVIDEO,     MKTAG('V', 'Y', 'U', 'Y') },
     { CODEC_ID_RAWVIDEO,     MKTAG('I', 'Y', 'U', 'V') },
+    { CODEC_ID_RAWVIDEO,     MKTAG('Y', '8', ' ', ' ') },
     { CODEC_ID_RAWVIDEO,     MKTAG('Y', '8', '0', '0') },
     { CODEC_ID_RAWVIDEO,     MKTAG('H', 'D', 'Y', 'C') },
     { CODEC_ID_RAWVIDEO,     MKTAG('Y', 'V', 'U', '9') },
@@ -250,6 +253,7 @@ const AVCodecTag ff_codec_bmp_tags[] = {
     { CODEC_ID_ZMBV,         MKTAG('Z', 'M', 'B', 'V') },
     { CODEC_ID_KMVC,         MKTAG('K', 'M', 'V', 'C') },
     { CODEC_ID_CAVS,         MKTAG('C', 'A', 'V', 'S') },
+    { CODEC_ID_JPEG2000,     MKTAG('m', 'j', 'p', '2') },
     { CODEC_ID_JPEG2000,     MKTAG('M', 'J', '2', 'C') },
     { CODEC_ID_VMNC,         MKTAG('V', 'M', 'n', 'c') },
     { CODEC_ID_TARGA,        MKTAG('t', 'g', 'a', ' ') },
@@ -536,6 +540,7 @@ int ff_get_wav_header(AVIOContext *pb, AVCodecContext *codec, int size)
         }
         codec->extradata_size = cbSize;
         if (cbSize > 0) {
+            av_free(codec->extradata);
             codec->extradata = av_mallocz(codec->extradata_size + FF_INPUT_BUFFER_PADDING_SIZE);
             if (!codec->extradata)
                 return AVERROR(ENOMEM);

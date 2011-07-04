@@ -154,7 +154,7 @@ typedef struct MotionEstContext{
     uint32_t *score_map;               ///< map to store the scores
     int map_generation;
     int pre_penalty_factor;
-    int penalty_factor;                /*!< an estimate of the bits required to
+    int penalty_factor;                /**< an estimate of the bits required to
                                         code a given mv value, e.g. (1,0) takes
                                         more bits than (0,0). We have to
                                         estimate whether any reduction in
@@ -475,7 +475,7 @@ typedef struct MpegEncContext {
     int last_bits; ///< temp var used for calculating the above vars
 
     /* error concealment / resync */
-    int error_count;
+    int error_count, error_occurred;
     uint8_t *error_status_table;       ///< table of the error status of each MB
 #define VP_START            1          ///< current MB is the first after a resync marker
 #define AC_ERROR            2
@@ -843,4 +843,3 @@ void ff_wmv2_encode_mb(MpegEncContext * s,
                        int motion_x, int motion_y);
 
 #endif /* AVCODEC_MPEGVIDEO_H */
-

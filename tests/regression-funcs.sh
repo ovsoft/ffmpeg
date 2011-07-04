@@ -15,17 +15,11 @@ datadir="./tests/data"
 target_datadir="${target_path}/${datadir}"
 
 this="$test.$test_ref"
-logdir="$datadir/regression/$test_ref"
-logfile="$logdir/$test"
 outfile="$datadir/$test_ref/"
-errfile="$datadir/$this.err"
 
 # various files
 ffmpeg="$target_exec ${target_path}/ffmpeg"
 tiny_psnr="tests/tiny_psnr"
-benchfile="$datadir/$this.bench"
-bench="$datadir/$this.bench.tmp"
-bench2="$datadir/$this.bench2.tmp"
 raw_src="${target_path}/$raw_src_dir/%02d.pgm"
 raw_dst="$datadir/$this.out.yuv"
 raw_ref="$datadir/$test_ref.ref.yuv"
@@ -35,17 +29,13 @@ pcm_ref="$datadir/$test_ref.ref.wav"
 crcfile="$datadir/$this.crc"
 target_crcfile="$target_datadir/$this.crc"
 
-cleanfiles="$raw_dst $pcm_dst $crcfile $bench $bench2"
+cleanfiles="$raw_dst $pcm_dst $crcfile"
 trap 'rm -f -- $cleanfiles' EXIT
 
 mkdir -p "$datadir"
 mkdir -p "$outfile"
-mkdir -p "$logdir"
-
-(exec >&3) 2>/dev/null || exec 3>&2
 
 [ "${V-0}" -gt 0 ] && echov=echov || echov=:
-[ "${V-0}" -gt 1 ] || exec 2>$errfile
 
 echov(){
     echo "$@" >&3
@@ -56,7 +46,7 @@ echov(){
 FFMPEG_OPTS="-v 0 -y"
 COMMON_OPTS="-flags +bitexact -idct simple -sws_flags +accurate_rnd+bitexact"
 DEC_OPTS="$COMMON_OPTS -threads $threads"
-ENC_OPTS="$COMMON_OPTS -dct fastint"
+ENC_OPTS="$COMMON_OPTS -threads 1 -dct fastint"
 
 run_ffmpeg()
 {
@@ -69,17 +59,15 @@ do_ffmpeg()
     f="$1"
     shift
     set -- $* ${target_path}/$f
-    run_ffmpeg -benchmark $* > $bench
-    do_md5sum $f >> $logfile
+    run_ffmpeg $*
+    do_md5sum $f
     if [ $f = $raw_dst ] ; then
-        $tiny_psnr $f $raw_ref >> $logfile
+        $tiny_psnr $f $raw_ref
     elif [ $f = $pcm_dst ] ; then
-        $tiny_psnr $f $pcm_ref 2 >> $logfile
+        $tiny_psnr $f $pcm_ref 2
     else
-        wc -c $f >> $logfile
+        wc -c $f
     fi
-    expr "$(cat $bench)" : '.*utime=\(.*s\)' > $bench2
-    echo $(cat $bench2) $f >> $benchfile
 }
 
 do_ffmpeg_nomd5()
@@ -87,16 +75,14 @@ do_ffmpeg_nomd5()
     f="$1"
     shift
     set -- $* ${target_path}/$f
-    run_ffmpeg -benchmark $* > $bench
+    run_ffmpeg $*
     if [ $f = $raw_dst ] ; then
-        $tiny_psnr $f $raw_ref >> $logfile
+        $tiny_psnr $f $raw_ref
     elif [ $f = $pcm_dst ] ; then
-        $tiny_psnr $f $pcm_ref 2 >> $logfile
+        $tiny_psnr $f $pcm_ref 2
     else
-        wc -c $f >> $logfile
+        wc -c $f
     fi
-    expr "$(cat $bench)" : '.*utime=\(.*s\)' > $bench2
-    echo $(cat $bench2) $f >> $benchfile
 }
 
 do_ffmpeg_crc()
@@ -104,21 +90,12 @@ do_ffmpeg_crc()
     f="$1"
     shift
     run_ffmpeg $* -f crc "$target_crcfile"
-    echo "$f $(cat $crcfile)" >> $logfile
-}
-
-do_ffmpeg_nocheck()
-{
-    f="$1"
-    shift
-    run_ffmpeg -benchmark $* > $bench
-    expr "$(cat $bench)" : '.*utime=\(.*s\)' > $bench2
-    echo $(cat $bench2) $f >> $benchfile
+    echo "$f $(cat $crcfile)"
 }
 
 do_video_decoding()
 {
-    do_ffmpeg $raw_dst $DEC_OPTS $1 -i $target_path/$file -f rawvideo $ENC_OPTS $2
+    do_ffmpeg $raw_dst $DEC_OPTS $1 -i $target_path/$file -f rawvideo $ENC_OPTS -vsync 0 $2
 }
 
 do_video_encoding()
@@ -130,7 +107,7 @@ do_video_encoding()
 do_audio_encoding()
 {
     file=${outfile}$1
-    do_ffmpeg $file $DEC_OPTS -ac 2 -f s16le -i $pcm_src -ab 128k $ENC_OPTS $2
+    do_ffmpeg $file $DEC_OPTS -ac 2 -ar 44100 -f s16le -i $pcm_src -ab 128k $ENC_OPTS $2
 }
 
 do_audio_decoding()

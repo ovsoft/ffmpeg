@@ -1,6 +1,6 @@
-SRC_DIR := $(SRC_PATH_BARE)/lib$(NAME)
+SRC_DIR := $(SRC_PATH)/lib$(NAME)
 
-include $(SUBDIR)../common.mak
+include $(SRC_PATH)/common.mak
 
 LIBVERSION := $(lib$(NAME)_VERSION)
 LIBMAJOR   := $(lib$(NAME)_VERSION_MAJOR)
@@ -11,16 +11,17 @@ all-$(CONFIG_STATIC): $(SUBDIR)$(LIBNAME)
 all-$(CONFIG_SHARED): $(SUBDIR)$(SLIBNAME)
 
 $(SUBDIR)%-test.o: $(SUBDIR)%-test.c
-	$(CC) $(CPPFLAGS) $(CFLAGS) -DTEST -c $(CC_O) $^
+	$(COMPILE_C)
 
 $(SUBDIR)%-test.o: $(SUBDIR)%.c
-	$(CC) $(CPPFLAGS) $(CFLAGS) -DTEST -c $(CC_O) $^
+	$(COMPILE_C)
 
 $(SUBDIR)x86/%.o: $(SUBDIR)x86/%.asm
 	$(YASMDEP) $(YASMFLAGS) -I $(<D)/ -M -o $@ $< > $(@:.o=.d)
 	$(YASM) $(YASMFLAGS) -I $(<D)/ -o $@ $<
 
-$(OBJS) $(SUBDIR)%.ho $(SUBDIR)%-test.o $(TESTOBJS): CPPFLAGS += -DHAVE_AV_CONFIG_H
+$(OBJS) $(SUBDIR)%.ho $(TESTOBJS): CPPFLAGS += -DHAVE_AV_CONFIG_H
+$(TESTOBJS): CPPFLAGS += -DTEST
 
 $(SUBDIR)$(LIBNAME): $(OBJS)
 	$(RM) $@
@@ -50,12 +51,12 @@ endif
 
 clean::
 	$(RM) $(addprefix $(SUBDIR),*-example$(EXESUF) *-test$(EXESUF) $(CLEANFILES) $(CLEANSUFFIXES) $(LIBSUFFIXES)) \
-	    $(addprefix $(SUBDIR), $(foreach suffix,$(CLEANSUFFIXES),$(addsuffix /$(suffix),$(DIRS)))) \
+	    $(foreach dir,$(DIRS),$(CLEANSUFFIXES:%=$(SUBDIR)$(dir)/%)) \
 	    $(HOSTOBJS) $(HOSTPROGS)
 
 distclean:: clean
-	$(RM)  $(addprefix $(SUBDIR),$(DISTCLEANSUFFIXES)) \
-            $(addprefix $(SUBDIR), $(foreach suffix,$(DISTCLEANSUFFIXES),$(addsuffix /$(suffix),$(DIRS))))
+	$(RM) $(DISTCLEANSUFFIXES:%=$(SUBDIR)%) \
+	    $(foreach dir,$(DIRS),$(DISTCLEANSUFFIXES:%=$(SUBDIR)$(dir)/%))
 
 install-lib$(NAME)-shared: $(SUBDIR)$(SLIBNAME)
 	$(Q)mkdir -p "$(SHLIBDIR)"
@@ -88,9 +89,9 @@ uninstall-libs::
 	-$(RM) "$(LIBDIR)/$(LIBNAME)"
 
 uninstall-headers::
-	$(RM) $(addprefix "$(INCINSTDIR)/",$(HEADERS))
+	$(RM) $(addprefix "$(INCINSTDIR)/",$(HEADERS)) $(addprefix "$(INCINSTDIR)/",$(BUILT_HEADERS))
 	$(RM) "$(LIBDIR)/pkgconfig/lib$(NAME).pc"
-	-rmdir "$(INCDIR)"
+	-rmdir "$(INCINSTDIR)"
 endef
 
 $(eval $(RULES))

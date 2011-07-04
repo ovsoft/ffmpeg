@@ -26,6 +26,7 @@
 #include "avfilter.h"
 #include "libavutil/avstring.h"
 #include "libavutil/eval.h"
+#include "libavutil/mathematics.h"
 #include "libavutil/pixdesc.h"
 #include "libavutil/avassert.h"
 #include "libswscale/swscale.h"
@@ -270,7 +271,8 @@ static int scale_slice(AVFilterLink *link, struct SwsContext *sws, int y, int h,
     ScaleContext *scale = link->dst->priv;
     AVFilterBufferRef *cur_pic = link->cur_buf;
     AVFilterBufferRef *out_buf = link->dst->outputs[0]->out_buf;
-    const uint8_t *in[4], *out[4];
+    const uint8_t *in[4];
+    uint8_t *out[4];
     int in_stride[4],out_stride[4];
     int i;
 

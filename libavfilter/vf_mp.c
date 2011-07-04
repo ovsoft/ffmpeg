@@ -41,6 +41,7 @@
 
 
 //FIXME maybe link the orig in
+//XXX: identical pix_fmt must be following with each others
 static const struct {
     int fmt;
     enum PixelFormat pix_fmt;
@@ -287,15 +288,6 @@ zrmjpeg
 CpuCaps gCpuCaps; //FIXME initialize this so optims work
 
 
-//exact copy from vf_scale.c
-int get_sws_cpuflags(void){
-    return
-          (gCpuCaps.hasMMX   ? SWS_CPU_CAPS_MMX   : 0)
-        | (gCpuCaps.hasMMX2  ? SWS_CPU_CAPS_MMX2  : 0)
-        | (gCpuCaps.has3DNow ? SWS_CPU_CAPS_3DNOW : 0)
-        | (gCpuCaps.hasAltiVec ? SWS_CPU_CAPS_ALTIVEC : 0);
-}
-
 static void sws_getFlagsAndFilterFromCmdLine(int *flags, SwsFilter **srcFilterParam, SwsFilter **dstFilterParam)
 {
         static int firstTime=1;
@@ -348,7 +340,7 @@ struct SwsContext *sws_getContextFromCmdLine(int srcW, int srcH, int srcFormat, 
         if (srcFormat == IMGFMT_RGB8 || srcFormat == IMGFMT_BGR8) sfmt = PIX_FMT_PAL8;
         sws_getFlagsAndFilterFromCmdLine(&flags, &srcFilterParam, &dstFilterParam);
 
-        return sws_getContext(srcW, srcH, sfmt, dstW, dstH, dfmt, flags | get_sws_cpuflags(), srcFilterParam, dstFilterParam, NULL);
+        return sws_getContext(srcW, srcH, sfmt, dstW, dstH, dfmt, flags , srcFilterParam, dstFilterParam, NULL);
 }
 
 typedef struct {
@@ -794,18 +786,22 @@ static int query_formats(AVFilterContext *ctx)
 {
     AVFilterFormats *avfmts=NULL;
     MPContext *m = ctx->priv;
+    enum PixelFormat lastpixfmt = PIX_FMT_NONE;
     int i;
 
     for(i=0; conversion_map[i].fmt; i++){
         av_log(ctx, AV_LOG_DEBUG, "query: %X\n", conversion_map[i].fmt);
         if(m->vf.query_format(&m->vf, conversion_map[i].fmt)){
             av_log(ctx, AV_LOG_DEBUG, "supported,adding\n");
-            avfilter_add_format(&avfmts, conversion_map[i].pix_fmt);
+            if (conversion_map[i].pix_fmt != lastpixfmt) {
+                avfilter_add_format(&avfmts, conversion_map[i].pix_fmt);
+                lastpixfmt = conversion_map[i].pix_fmt;
+            }
         }
     }
 
     //We assume all allowed input formats are also allowed output formats
-    avfilter_set_common_formats(ctx, avfmts);
+    avfilter_set_common_pixel_formats(ctx, avfmts);
     return 0;
 }
 
@@ -891,7 +887,7 @@ static void end_frame(AVFilterLink *inlink)
     }
     free_mp_image(mpi);
 
-//    avfilter_unref_buffer(inpic);
+    avfilter_unref_buffer(inpic);
 }
 
 AVFilter avfilter_vf_mp = {

@@ -284,8 +284,7 @@ following image formats are supported:
     @tab Digital Picture Exchange
 @item JPEG         @tab X @tab X
     @tab Progressive JPEG is not supported.
-@item JPEG 2000    @tab   @tab E
-    @tab decoding supported through external library libopenjpeg
+@item JPEG 2000    @tab X @tab X
 @item JPEG-LS      @tab X @tab X
 @item LJPEG        @tab X @tab
     @tab Lossless JPEG
@@ -618,7 +617,7 @@ following image formats are supported:
     @tab Used in Origin's Wing Commander IV AVI files.
 @item DSP Group TrueSpeech   @tab     @tab  X
 @item DV audio               @tab     @tab  X
-@item Enhanced AC-3          @tab     @tab  X
+@item Enhanced AC-3          @tab  X  @tab  X
 @item FLAC (Free Lossless Audio Codec)  @tab  X  @tab  IX
 @item GSM                    @tab  E  @tab  X
     @tab encoding supported through external library libgsm
@@ -763,12 +762,6 @@ performance on systems without hardware floating point support).
 
 Using a cross-compiler is preferred for various reasons.
 
-@subsection DJGPP
-
-FFmpeg cannot be compiled because of broken system headers, add
-@code{--extra-cflags=-U__STRICT_ANSI__} to the configure options as a
-workaround.
-
 @section OS/2
 
 For information about compiling FFmpeg on OS/2 see
@@ -826,8 +819,8 @@ the FFmpeg Windows Help Forum at
 
 FFmpeg can be built to run natively on Windows using the MinGW tools. Install
 the latest versions of MSYS and MinGW from @url{http://www.mingw.org/}.
-You can find detailed installation
-instructions in the download section and the FAQ.
+You can find detailed installation instructions in the download
+section and the FAQ.
 
 FFmpeg does not build out-of-the-box with the packages the automated MinGW
 installer provides. It also requires coreutils to be installed and many other
@@ -843,18 +836,6 @@ are listed below:
 
 FFmpeg automatically passes @code{-fno-common} to the compiler to work around
 a GCC bug (see @url{http://gcc.gnu.org/bugzilla/show_bug.cgi?id=37216}).
-
-Within the MSYS shell, configure and make with:
-
-@example
-./configure --enable-memalign-hack
-make
-make install
-@end example
-
-This will install @file{ffmpeg.exe} along with many other development files
-to @file{/usr/local}. You may specify another install path using the
-@code{--prefix} option in @file{configure}.
 
 Notes:
 
@@ -873,7 +854,8 @@ where SDL was installed. Verify that @file{sdl-config} can be launched from
 the MSYS command line.
 
 @item By using @code{./configure --enable-shared} when configuring FFmpeg,
-you can build libavutil, libavcodec and libavformat as DLLs.
+you can build the FFmpeg libraries (e.g. libavutil, libavcodec,
+libavformat) as DLLs.
 
 @end itemize
 
@@ -980,7 +962,7 @@ MSVC++-compatible import libraries.
 @item Build FFmpeg with
 
 @example
-./configure --enable-shared --enable-memalign-hack
+./configure --enable-shared
 make
 make install
 @end example
@@ -1102,12 +1084,12 @@ and add some special flags to your configure invocation.
 
 For a static build run
 @example
-./configure --target-os=mingw32 --enable-memalign-hack --enable-static --disable-shared --extra-cflags=-mno-cygwin --extra-libs=-mno-cygwin
+./configure --target-os=mingw32 --enable-static --disable-shared --extra-cflags=-mno-cygwin --extra-libs=-mno-cygwin
 @end example
 
 and for a build with shared libraries
 @example
-./configure --target-os=mingw32 --enable-memalign-hack --enable-shared --disable-static --extra-cflags=-mno-cygwin --extra-libs=-mno-cygwin
+./configure --target-os=mingw32 --enable-shared --disable-static --extra-cflags=-mno-cygwin --extra-libs=-mno-cygwin
 @end example
 
 @bye

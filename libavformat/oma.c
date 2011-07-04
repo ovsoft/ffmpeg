@@ -80,6 +80,8 @@ static int oma_read_header(AVFormatContext *s,
 
     ff_id3v2_read(s, ID3v2_EA3_MAGIC);
     ret = avio_read(s->pb, buf, EA3_HEADER_SIZE);
+    if (ret < EA3_HEADER_SIZE)
+        return -1;
 
     if (memcmp(buf, ((const uint8_t[]){'E', 'A', '3'}),3) || buf[4] != 0 || buf[5] != EA3_HEADER_SIZE) {
         av_log(s, AV_LOG_ERROR, "Couldn't find the EA3 header !\n");
@@ -147,7 +149,6 @@ static int oma_read_header(AVFormatContext *s,
         default:
             av_log(s, AV_LOG_ERROR, "Unsupported codec %d!\n",buf[32]);
             return -1;
-            break;
     }
 
     st->codec->block_align = framesize;

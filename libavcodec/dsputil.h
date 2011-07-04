@@ -150,7 +150,7 @@ void clear_blocks_c(DCTELEM *blocks);
 
 /* add and put pixel (decoding) */
 // blocksizes for op_pixels_func are 8x4,8x8 16x8 16x16
-//h for op_pixels_func is limited to {width/2, width} but never larger than 16 and never smaller then 4
+//h for op_pixels_func is limited to {width/2, width} but never larger than 16 and never smaller than 4
 typedef void (*op_pixels_func)(uint8_t *block/*align width (8 or 16)*/, const uint8_t *pixels/*align 1*/, int line_size, int h);
 typedef void (*tpel_mc_func)(uint8_t *block/*align width (8 or 16)*/, const uint8_t *pixels/*align 1*/, int line_size, int w, int h);
 typedef void (*qpel_mc_func)(uint8_t *dst/*align width (8 or 16)*/, uint8_t *src/*align 1*/, int stride);
@@ -183,7 +183,7 @@ static void a(uint8_t *block, const uint8_t *pixels, int line_size, int h){\
 }
 
 /* motion estimation */
-// h is limited to {width/2, width, 2*width} but never larger than 16 and never smaller then 2
+// h is limited to {width/2, width, 2*width} but never larger than 16 and never smaller than 2
 // although currently h<4 is not used as functions with width <8 are neither used nor implemented
 typedef int (*me_cmp_func)(void /*MpegEncContext*/ *s, uint8_t *blk1/*align width (8 or 16)*/, uint8_t *blk2/*align 1*/, int line_size, int h)/* __attribute__ ((const))*/;
 
@@ -505,7 +505,7 @@ typedef struct DSPContext {
 #define BASIS_SHIFT 16
 #define RECON_SHIFT 6
 
-    void (*draw_edges)(uint8_t *buf, int wrap, int width, int height, int w, int sides);
+    void (*draw_edges)(uint8_t *buf, int wrap, int width, int height, int w, int h, int sides);
 #define EDGE_WIDTH 16
 #define EDGE_TOP    1
 #define EDGE_BOTTOM 2
@@ -552,6 +552,22 @@ typedef struct DSPContext {
      */
     void (*apply_window_int16)(int16_t *output, const int16_t *input,
                                const int16_t *window, unsigned int len);
+
+    /**
+     * Clip each element in an array of int32_t to a given minimum and maximum value.
+     * @param dst  destination array
+     *             constraints: 16-byte aligned
+     * @param src  source array
+     *             constraints: 16-byte aligned
+     * @param min  minimum value
+     *             constraints: must in the the range [-(1<<24), 1<<24]
+     * @param max  maximum value
+     *             constraints: must in the the range [-(1<<24), 1<<24]
+     * @param len  number of elements in the array
+     *             constraints: multiple of 32 greater than zero
+     */
+    void (*vector_clip_int32)(int32_t *dst, const int32_t *src, int32_t min,
+                              int32_t max, unsigned int len);
 
     /* rv30 functions */
     qpel_mc_func put_rv30_tpel_pixels_tab[4][16];
@@ -628,13 +644,6 @@ static inline int get_penalty_factor(int lambda, int lambda2, int type){
     }
 }
 
-/**
- * Empty mmx state.
- * this must be called between any dsp function and float/double code.
- * for example sin(); dsp->idct_put(); emms_c(); cos()
- */
-#define emms_c()
-
 void dsputil_init_alpha(DSPContext* c, AVCodecContext *avctx);
 void dsputil_init_arm(DSPContext* c, AVCodecContext *avctx);
 void dsputil_init_bfin(DSPContext* c, AVCodecContext *avctx);
@@ -652,22 +661,9 @@ void ff_intrax8dsp_init(DSPContext* c, AVCodecContext *avctx);
 void ff_mlp_init(DSPContext* c, AVCodecContext *avctx);
 void ff_mlp_init_x86(DSPContext* c, AVCodecContext *avctx);
 
-#if HAVE_MMX
 
-#undef emms_c
+#if ARCH_ARM
 
-static inline void emms(void)
-{
-    __asm__ volatile ("emms;":::"memory");
-}
-
-#define emms_c() \
-{\
-    if(av_get_cpu_flags() & AV_CPU_FLAG_MMX)\
-        emms();\
-}
-
-#elif ARCH_ARM
 
 #if HAVE_NEON
 #   define STRIDE_ALIGN 16
@@ -706,11 +702,6 @@ static inline void emms(void)
 #else
 #   define LOCAL_ALIGNED_16(t, v, ...) LOCAL_ALIGNED(16, t, v, __VA_ARGS__)
 #endif
-
-/* PSNR */
-void get_psnr(uint8_t *orig_image[3], uint8_t *coded_image[3],
-              int orig_linesize[3], int coded_linesize,
-              AVCodecContext *avctx);
 
 #define WRAPPER8_16(name8, name16)\
 static int name16(void /*MpegEncContext*/ *s, uint8_t *dst, uint8_t *src, int stride, int h){\

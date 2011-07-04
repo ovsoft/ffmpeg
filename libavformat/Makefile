@@ -24,7 +24,7 @@ OBJS-$(CONFIG_AC3_MUXER)                 += rawenc.o
 OBJS-$(CONFIG_ADTS_MUXER)                += adtsenc.o
 OBJS-$(CONFIG_AEA_DEMUXER)               += aea.o pcm.o
 OBJS-$(CONFIG_AIFF_DEMUXER)              += aiffdec.o riff.o pcm.o isom.o
-OBJS-$(CONFIG_AIFF_MUXER)                += aiffenc.o riff.o
+OBJS-$(CONFIG_AIFF_MUXER)                += aiffenc.o riff.o isom.o
 OBJS-$(CONFIG_AMR_DEMUXER)               += amr.o
 OBJS-$(CONFIG_AMR_MUXER)                 += amr.o
 OBJS-$(CONFIG_ANM_DEMUXER)               += anm.o
@@ -233,6 +233,7 @@ OBJS-$(CONFIG_RSO_MUXER)                 += rsoenc.o rso.o
 OBJS-$(CONFIG_RPL_DEMUXER)               += rpl.o
 OBJS-$(CONFIG_RTP_MUXER)                 += rtp.o         \
                                             rtpenc_aac.o     \
+                                            rtpenc_latm.o    \
                                             rtpenc_amr.o     \
                                             rtpenc_h263.o    \
                                             rtpenc_mpv.o     \
@@ -337,11 +338,10 @@ OBJS-$(CONFIG_TCP_PROTOCOL)              += tcp.o
 OBJS-$(CONFIG_UDP_PROTOCOL)              += udp.o
 
 # libavdevice dependencies
+OBJS-$(CONFIG_ALSA_INDEV)                += timefilter.o
 OBJS-$(CONFIG_JACK_INDEV)                += timefilter.o
 
-EXAMPLES  = output
+EXAMPLES  = metadata
 TESTPROGS = timefilter
 
-include $(SUBDIR)../subdir.mak
-
-$(SUBDIR)output-example$(EXESUF): ELIBS = -lswscale
+include $(SRC_PATH)/subdir.mak

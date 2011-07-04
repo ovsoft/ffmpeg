@@ -30,6 +30,9 @@
 #include "libavutil/samplefmt.h"
 #include "libavutil/avutil.h"
 #include "libavutil/cpu.h"
+#include "libavutil/log.h"
+#include "libavutil/pixfmt.h"
+#include "libavutil/rational.h"
 
 #include "libavcodec/version.h"
 
@@ -204,6 +207,7 @@ enum CodecID {
     CODEC_ID_PRORES,
     CODEC_ID_JV,
     CODEC_ID_DFA,
+    CODEC_ID_8SVX_RAW,
 
     /* various PCM "codecs" */
     CODEC_ID_PCM_S16LE= 0x10000,
@@ -428,7 +432,7 @@ enum CodecID {
  * Note: If the first 23 bits of the additional bytes are not 0, then damaged
  * MPEG bitstreams could cause overread and segfault.
  */
-#define FF_INPUT_BUFFER_PADDING_SIZE 8
+#define FF_INPUT_BUFFER_PADDING_SIZE 16
 
 /**
  * minimum encoding buffer size
@@ -687,6 +691,10 @@ typedef struct RcOverride{
  * Codec supports slice-based (or partition-based) multithreading.
  */
 #define CODEC_CAP_SLICE_THREADS    0x2000
+/**
+ * Codec is lossless.
+ */
+#define CODEC_CAP_LOSSLESS         0x80000000
 
 //The following defines may change, don't expect compatibility if you use them.
 #define MB_TYPE_INTRA4x4   0x0001
@@ -1405,7 +1413,7 @@ typedef struct AVCodecContext {
      * A demuxer should set this to what is stored in the field used to identify the codec.
      * If there are multiple such fields in a container then the demuxer should choose the one
      * which maximizes the information about the used codec.
-     * If the codec tag field in a container is larger then 32 bits then the demuxer should
+     * If the codec tag field in a container is larger than 32 bits then the demuxer should
      * remap the longer ID to 32 bits with a table or other structure. Alternatively a new
      * extra_codec_tag + size could be added but for this a clear advantage must be demonstrated
      * first.
@@ -2530,7 +2538,7 @@ typedef struct AVCodecContext {
 
 #if FF_API_FLAC_GLOBAL_OPTS
     /**
-     * @defgroup flac_opts FLAC options
+     * @name FLAC options
      * @deprecated Use FLAC encoder private options instead.
      * @{
      */
@@ -2610,7 +2618,7 @@ typedef struct AVCodecContext {
     /**
      * Audio channel layout.
      * - encoding: set by user.
-     * - decoding: set by libavcodec.
+     * - decoding: set by user, may be overwritten by libavcodec.
      */
     int64_t channel_layout;
 
@@ -2880,6 +2888,14 @@ typedef struct AVCodecContext {
     enum AVAudioServiceType audio_service_type;
 
     /**
+     * desired sample format
+     * - encoding: Not used.
+     * - decoding: Set by user.
+     * Decoder will decode to this format if it can.
+     */
+    enum AVSampleFormat request_sample_fmt;
+
+    /**
      * Current statistics for PTS correction.
      * - decoding: maintained and used by libavcodec, not intended to be used by user apps
      * - encoding: unused
@@ -2889,13 +2905,6 @@ typedef struct AVCodecContext {
     int64_t pts_correction_last_pts;       /// PTS of the last frame
     int64_t pts_correction_last_dts;       /// DTS of the last frame
 
-    /**
-     * desired sample format
-     * - encoding: Not used.
-     * - decoding: Set by user.
-     * Decoder will decode to this format if it can.
-     */
-    enum AVSampleFormat request_sample_fmt;
 
 } AVCodecContext;
 
@@ -2951,7 +2960,7 @@ typedef struct AVCodec {
     const AVProfile *profiles;              ///< array of recognized profiles, or NULL if unknown, array is terminated by {FF_PROFILE_UNKNOWN}
 
     /**
-     * @defgroup framethreading Frame-level threading support functions.
+     * @name Frame-level threading support functions
      * @{
      */
     /**
@@ -3227,6 +3236,11 @@ uint8_t* av_packet_new_side_data(AVPacket *pkt, enum AVPacketSideDataType type,
 uint8_t* av_packet_get_side_data(AVPacket *pkt, enum AVPacketSideDataType type,
                                  int *size);
 
+int av_packet_merge_side_data(AVPacket *pkt);
+
+int av_packet_split_side_data(AVPacket *pkt);
+
+
 /* resample.c */
 
 struct ReSampleContext;
@@ -3309,7 +3323,7 @@ void av_resample_close(struct AVResampleContext *c);
 /**
  * Allocate memory for a picture.  Call avpicture_free() to free it.
  *
- * \see avpicture_fill()
+ * @see avpicture_fill()
  *
  * @param picture the picture to be filled in
  * @param pix_fmt the format of the picture
@@ -3356,7 +3370,7 @@ int avpicture_fill(AVPicture *picture, uint8_t *ptr,
  * The data is stored compactly, without any gaps for alignment or padding
  * which may be applied by avpicture_fill().
  *
- * \see avpicture_get_size()
+ * @see avpicture_get_size()
  *
  * @param[in] src AVPicture containing image data
  * @param[in] pix_fmt The format in which the picture data is stored.
@@ -3384,12 +3398,16 @@ int avpicture_layout(const AVPicture* src, enum PixelFormat pix_fmt, int width, 
 int avpicture_get_size(enum PixelFormat pix_fmt, int width, int height);
 void avcodec_get_chroma_sub_sample(enum PixelFormat pix_fmt, int *h_shift, int *v_shift);
 
+#if FF_API_GET_PIX_FMT_NAME
 /**
  * Return the short name for a pixel format.
  *
  * \see av_get_pix_fmt(), av_get_pix_fmt_string().
+ * @deprecated Deprecated in favor of av_get_pix_fmt_name().
  */
+attribute_deprecated
 const char *avcodec_get_pix_fmt_name(enum PixelFormat pix_fmt);
+#endif
 
 void avcodec_set_dimensions(AVCodecContext *s, int width, int height);
 
@@ -3900,7 +3918,7 @@ int av_get_bits_per_sample(enum CodecID codec_id);
 
 #if FF_API_OLD_SAMPLE_FMT
 /**
- * @deprecated Use av_get_bits_per_sample_fmt() instead.
+ * @deprecated Use av_get_bytes_per_sample() instead.
  */
 attribute_deprecated
 int av_get_bits_per_sample_format(enum AVSampleFormat sample_fmt);
@@ -3949,7 +3967,7 @@ typedef struct AVCodecParserContext {
     int64_t offset;      ///< byte offset from starting packet start
     int64_t cur_frame_end[AV_PARSER_PTS_NB];
 
-    /*!
+    /**
      * Set by parser to 1 for key frames and 0 for non-key frames.
      * It is initialized to -1, so if the parser doesn't set this flag,
      * old-style fallback using AV_PICTURE_TYPE_I picture type as key frames
@@ -4196,7 +4214,7 @@ void av_log_missing_feature(void *avc, const char *feature, int want_sample);
  * a pointer to an AVClass struct
  * @param[in] msg string containing an optional message, or NULL if no message
  */
-void av_log_ask_for_sample(void *avc, const char *msg, ...);
+void av_log_ask_for_sample(void *avc, const char *msg, ...) av_printf_format(2, 3);
 
 /**
  * Register the hardware accelerator hwaccel.

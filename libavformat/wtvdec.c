@@ -431,7 +431,7 @@ static void get_attachment(AVFormatContext *s, AVIOContext *pb, int length)
     st = av_new_stream(s, 0);
     if (!st)
         goto done;
-    av_metadata_set2(&st->metadata, "title", description, 0);
+    av_dict_set(&st->metadata, "title", description, 0);
     st->codec->codec_id   = CODEC_ID_MJPEG;
     st->codec->codec_type = AVMEDIA_TYPE_ATTACHMENT;
     st->codec->extradata  = av_mallocz(filesize);
@@ -494,7 +494,7 @@ static void get_tag(AVFormatContext *s, AVIOContext *pb, const char *key, int ty
         return;
     }
 
-    av_metadata_set2(&s->metadata, key, buf, 0);
+    av_dict_set(&s->metadata, key, buf, 0);
     av_freep(&buf);
 }
 
@@ -716,7 +716,7 @@ enum {
  * Parse WTV chunks
  * @param mode SEEK_TO_DATA or SEEK_TO_PTS
  * @param seekts timestamp
- * @param[out] len Length of data chunk
+ * @param[out] len_ptr Length of data chunk
  * @return stream index of data chunk, or <0 on error
  */
 static int parse_chunks(AVFormatContext *s, int mode, int64_t seekts, int *len_ptr)
@@ -818,7 +818,7 @@ static int parse_chunks(AVFormatContext *s, int mode, int64_t seekts, int *len_p
                 avio_read(pb, language, 3);
                 if (language[0]) {
                     language[3] = 0;
-                    av_metadata_set2(&st->metadata, "language", language, 0);
+                    av_dict_set(&st->metadata, "language", language, 0);
                     if (!strcmp(language, "nar") || !strcmp(language, "NAR"))
                         st->disposition |= AV_DISPOSITION_VISUAL_IMPAIRED;
                 }

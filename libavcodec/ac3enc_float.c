@@ -27,14 +27,25 @@
  */
 
 #define CONFIG_AC3ENC_FLOAT 1
-#include "ac3enc.c"
+#include "ac3enc.h"
+#include "eac3enc.h"
 #include "kbdwin.h"
+
+
+#if CONFIG_AC3_ENCODER
+#define AC3ENC_TYPE AC3ENC_TYPE_AC3
+#include "ac3enc_opts_template.c"
+static AVClass ac3enc_class = { "AC-3 Encoder", av_default_item_name,
+                                ac3_options, LIBAVUTIL_VERSION_INT };
+#endif
+
+#include "ac3enc_template.c"
 
 
 /**
  * Finalize MDCT and free allocated memory.
  */
-static av_cold void mdct_end(AC3MDCTContext *mdct)
+av_cold void ff_ac3_float_mdct_end(AC3MDCTContext *mdct)
 {
     ff_mdct_end(&mdct->fft);
     av_freep(&mdct->window);
@@ -45,8 +56,8 @@ static av_cold void mdct_end(AC3MDCTContext *mdct)
  * Initialize MDCT tables.
  * @param nbits log2(MDCT size)
  */
-static av_cold int mdct_init(AVCodecContext *avctx, AC3MDCTContext *mdct,
-                             int nbits)
+av_cold int ff_ac3_float_mdct_init(AVCodecContext *avctx, AC3MDCTContext *mdct,
+                                   int nbits)
 {
     float *window;
     int i, n, n2;
@@ -79,11 +90,11 @@ static void apply_window(DSPContext *dsp, float *output, const float *input,
 
 
 /**
- * Normalize the input samples to use the maximum available precision.
+ * Normalize the input samples.
+ * Not needed for the floating-point encoder.
  */
 static int normalize_samples(AC3EncodeContext *s)
 {
-    /* Normalization is not needed for floating-point samples, so just return 0 */
     return 0;
 }
 
@@ -93,22 +104,35 @@ static int normalize_samples(AC3EncodeContext *s)
  */
 static void scale_coefficients(AC3EncodeContext *s)
 {
-    s->ac3dsp.float_to_fixed24(s->fixed_coef_buffer, s->mdct_coef_buffer,
-                               AC3_MAX_COEFS * AC3_MAX_BLOCKS * s->channels);
+    int chan_size = AC3_MAX_COEFS * AC3_MAX_BLOCKS;
+    s->ac3dsp.float_to_fixed24(s->fixed_coef_buffer + chan_size,
+                               s->mdct_coef_buffer  + chan_size,
+                               chan_size * s->channels);
 }
 
 
+/**
+ * Clip MDCT coefficients to allowable range.
+ */
+static void clip_coefficients(DSPContext *dsp, float *coef, unsigned int len)
+{
+    dsp->vector_clipf(coef, coef, COEF_MIN, COEF_MAX, len);
+}
+
+
+#if CONFIG_AC3_ENCODER
 AVCodec ff_ac3_float_encoder = {
     "ac3_float",
     AVMEDIA_TYPE_AUDIO,
     CODEC_ID_AC3,
     sizeof(AC3EncodeContext),
-    ac3_encode_init,
-    ac3_encode_frame,
-    ac3_encode_close,
+    ff_ac3_encode_init,
+    ff_ac3_float_encode_frame,
+    ff_ac3_encode_close,
     NULL,
     .sample_fmts = (const enum AVSampleFormat[]){AV_SAMPLE_FMT_FLT,AV_SAMPLE_FMT_NONE},
     .long_name = NULL_IF_CONFIG_SMALL("ATSC A/52A (AC-3)"),
     .priv_class = &ac3enc_class,
     .channel_layouts = ff_ac3_channel_layouts,
 };
+#endif

@@ -35,7 +35,11 @@
 #include "network.h"
 #include "os_support.h"
 #include "url.h"
+
+#if HAVE_PTHREADS
 #include <pthread.h>
+#endif
+
 #include <sys/time.h>
 
 #ifndef IPV6_ADD_MEMBERSHIP
@@ -57,9 +61,10 @@ typedef struct {
     /* Circular Buffer variables for use in UDP receive code */
     int circular_buffer_size;
     AVFifoBuffer *fifo;
-    int circular_buffer_available_max;
     int circular_buffer_error;
+#if HAVE_PTHREADS
     pthread_t circular_buffer_thread;
+#endif
 } UDPContext;
 
 #define UDP_TX_BUF_SIZE 32768
@@ -399,7 +404,7 @@ static int udp_open(URLContext *h, const char *uri, int flags)
     p = strchr(uri, '?');
     if (p) {
         if (av_find_info_tag(buf, sizeof(buf), "reuse", p)) {
-            char *endptr=NULL;
+            char *endptr = NULL;
             s->reuse_socket = strtol(buf, &endptr, 10);
             /* assume if no digits were found it is a request to enable it */
             if (buf == endptr)
@@ -439,7 +444,7 @@ static int udp_open(URLContext *h, const char *uri, int flags)
             goto fail;
     }
 
-    if (s->is_multicast && (h->flags & AVIO_FLAG_READ))
+    if ((s->is_multicast || !s->local_port) && (h->flags & AVIO_FLAG_READ))
         s->local_port = port;
     udp_fd = udp_socket_create(s, &my_addr, &len);
     if (udp_fd < 0)
@@ -506,6 +511,7 @@ static int udp_open(URLContext *h, const char *uri, int flags)
 
     s->udp_fd = udp_fd;
 
+#if HAVE_PTHREADS
     if (!is_output && s->circular_buffer_size) {
         /* start the task going */
         s->fifo = av_fifo_alloc(s->circular_buffer_size);
@@ -514,12 +520,13 @@ static int udp_open(URLContext *h, const char *uri, int flags)
             goto fail;
         }
     }
+#endif
 
     return 0;
  fail:
     if (udp_fd >= 0)
         closesocket(udp_fd);
-        av_fifo_free(s->fifo);
+    av_fifo_free(s->fifo);
     av_free(s);
     return AVERROR(EIO);
 }
@@ -529,7 +536,6 @@ static int udp_read(URLContext *h, uint8_t *buf, int size)
     UDPContext *s = h->priv_data;
     int ret;
     int avail;
-    int left;
     fd_set rfds;
     struct timeval tv;
 
@@ -594,7 +600,6 @@ static int udp_close(URLContext *h)
     if (s->is_multicast && (h->flags & AVIO_FLAG_READ))
         udp_leave_multicast_group(s->udp_fd, (struct sockaddr *)&s->dest_addr);
     closesocket(s->udp_fd);
-    av_log( h, AV_LOG_INFO, "circular_buffer_info max:%d%%\r\n", (s->circular_buffer_available_max*100)/s->circular_buffer_size);
     av_fifo_free(s->fifo);
     av_free(s);
     return 0;

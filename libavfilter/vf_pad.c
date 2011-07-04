@@ -21,7 +21,7 @@
 
 /**
  * @file
- * video padding filter and color source
+ * video padding filter
  */
 
 #include "avfilter.h"
@@ -32,6 +32,7 @@
 #include "libavutil/avassert.h"
 #include "libavutil/imgutils.h"
 #include "libavutil/parseutils.h"
+#include "libavutil/mathematics.h"
 #include "drawutils.h"
 
 static const char *var_names[] = {
@@ -83,7 +84,7 @@ static int query_formats(AVFilterContext *ctx)
         PIX_FMT_NONE
     };
 
-    avfilter_set_common_formats(ctx, avfilter_make_format_list(pix_fmts));
+    avfilter_set_common_pixel_formats(ctx, avfilter_make_format_list(pix_fmts));
     return 0;
 }
 
