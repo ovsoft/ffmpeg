@@ -75,7 +75,7 @@ static int msnwc_tcp_read_header(AVFormatContext *ctx, AVFormatParameters *ap)
     AVCodecContext *codec;
     AVStream *st;
 
-    st = av_new_stream(ctx, 0);
+    st = avformat_new_stream(ctx, NULL);
     if(!st)
         return AVERROR(ENOMEM);
 
@@ -131,10 +131,9 @@ static int msnwc_tcp_read_packet(AVFormatContext *ctx, AVPacket *pkt)
 }
 
 AVInputFormat ff_msnwc_tcp_demuxer = {
-    "msnwctcp",
-    NULL_IF_CONFIG_SMALL("MSN TCP Webcam stream"),
-    0,
-    msnwc_tcp_probe,
-    msnwc_tcp_read_header,
-    msnwc_tcp_read_packet,
+    .name           = "msnwctcp",
+    .long_name      = NULL_IF_CONFIG_SMALL("MSN TCP Webcam stream"),
+    .read_probe     = msnwc_tcp_probe,
+    .read_header    = msnwc_tcp_read_header,
+    .read_packet    = msnwc_tcp_read_packet,
 };

@@ -42,11 +42,11 @@ static int read_header(AVFormatContext *s, AVFormatParameters *ap)
     AVStream *ast, *vst;
     unsigned int version, frames_count, msecs_per_frame, player_version;
 
-    ast = av_new_stream(s, 0);
+    ast = avformat_new_stream(s, NULL);
     if (!ast)
         return AVERROR(ENOMEM);
 
-    vst = av_new_stream(s, 0);
+    vst = avformat_new_stream(s, NULL);
     if (!vst)
         return AVERROR(ENOMEM);
 
@@ -124,11 +124,10 @@ static int read_packet(AVFormatContext *s, AVPacket *pkt)
 }
 
 AVInputFormat ff_mvi_demuxer = {
-    "mvi",
-    NULL_IF_CONFIG_SMALL("Motion Pixels MVI format"),
-    sizeof(MviDemuxContext),
-    NULL,
-    read_header,
-    read_packet,
+    .name           = "mvi",
+    .long_name      = NULL_IF_CONFIG_SMALL("Motion Pixels MVI format"),
+    .priv_data_size = sizeof(MviDemuxContext),
+    .read_header    = read_header,
+    .read_packet    = read_packet,
     .extensions = "mvi"
 };

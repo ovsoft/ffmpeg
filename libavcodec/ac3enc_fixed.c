@@ -29,38 +29,42 @@
 #define CONFIG_FFT_FLOAT 0
 #undef CONFIG_AC3ENC_FLOAT
 #include "ac3enc.h"
+#include "eac3enc.h"
 
 #define AC3ENC_TYPE AC3ENC_TYPE_AC3_FIXED
 #include "ac3enc_opts_template.c"
-static AVClass ac3enc_class = { "Fixed-Point AC-3 Encoder", av_default_item_name,
-                                ac3fixed_options, LIBAVUTIL_VERSION_INT };
+static const AVClass ac3enc_class = { "Fixed-Point AC-3 Encoder", av_default_item_name,
+                                      ac3fixed_options, LIBAVUTIL_VERSION_INT };
 
 #include "ac3enc_template.c"
 
 
 /**
  * Finalize MDCT and free allocated memory.
+ *
+ * @param s  AC-3 encoder private context
  */
-av_cold void AC3_NAME(mdct_end)(AC3MDCTContext *mdct)
+av_cold void AC3_NAME(mdct_end)(AC3EncodeContext *s)
 {
-    ff_mdct_end(&mdct->fft);
+    ff_mdct_end(&s->mdct);
 }
 
 
 /**
  * Initialize MDCT tables.
- * @param nbits log2(MDCT size)
+ *
+ * @param s  AC-3 encoder private context
+ * @return   0 on success, negative error code on failure
  */
-av_cold int AC3_NAME(mdct_init)(AVCodecContext *avctx, AC3MDCTContext *mdct,
-                                int nbits)
+av_cold int AC3_NAME(mdct_init)(AC3EncodeContext *s)
 {
-    int ret = ff_mdct_init(&mdct->fft, nbits, 0, -1.0);
-    mdct->window = ff_ac3_window;
+    int ret = ff_mdct_init(&s->mdct, 9, 0, -1.0);
+    s->mdct_window = ff_ac3_window;
     return ret;
 }
 
 
-/**
+/*
  * Apply KBD window to input samples prior to MDCT.
  */
 static void apply_window(DSPContext *dsp, int16_t *output, const int16_t *input,
@@ -70,11 +74,9 @@ static void apply_window(DSPContext *dsp, int16_t *output, const int16_t *input,
 }
 
 
-/**
+/*
  * Normalize the input samples to use the maximum available precision.
  * This assumes signed 16-bit input samples.
- *
- * @return exponent shift
  */
 static int normalize_samples(AC3EncodeContext *s)
 {
@@ -87,14 +89,14 @@ static int normalize_samples(AC3EncodeContext *s)
 }
 
 
-/**
+/*
  * Scale MDCT coefficients to 25-bit signed fixed-point.
  */
 static void scale_coefficients(AC3EncodeContext *s)
 {
     int blk, ch;
 
-    for (blk = 0; blk < AC3_MAX_BLOCKS; blk++) {
+    for (blk = 0; blk < s->num_blocks; blk++) {
         AC3Block *block = &s->blocks[blk];
         for (ch = 1; ch <= s->channels; ch++) {
             s->ac3dsp.ac3_rshift_int32(block->mdct_coef[ch], AC3_MAX_COEFS,
@@ -103,13 +105,35 @@ static void scale_coefficients(AC3EncodeContext *s)
     }
 }
 
+static void sum_square_butterfly(AC3EncodeContext *s, int64_t sum[4],
+                                 const int32_t *coef0, const int32_t *coef1,
+                                 int len)
+{
+    s->ac3dsp.sum_square_butterfly_int32(sum, coef0, coef1, len);
+}
 
-/**
+/*
  * Clip MDCT coefficients to allowable range.
  */
 static void clip_coefficients(DSPContext *dsp, int32_t *coef, unsigned int len)
 {
     dsp->vector_clip_int32(coef, coef, COEF_MIN, COEF_MAX, len);
+}
+
+
+/*
+ * Calculate a single coupling coordinate.
+ */
+static CoefType calc_cpl_coord(CoefSumType energy_ch, CoefSumType energy_cpl)
+{
+    if (energy_cpl <= COEF_MAX) {
+        return 1048576;
+    } else {
+        uint64_t coord   = energy_ch / (energy_cpl >> 24);
+        uint32_t coord32 = FFMIN(coord, 1073741824);
+        coord32          = ff_sqrt(coord32) << 9;
+        return FFMIN(coord32, COEF_MAX);
+    }
 }
 
 
@@ -122,14 +146,13 @@ static av_cold int ac3_fixed_encode_init(AVCodecContext *avctx)
 
 
 AVCodec ff_ac3_fixed_encoder = {
-    "ac3_fixed",
-    AVMEDIA_TYPE_AUDIO,
-    CODEC_ID_AC3,
-    sizeof(AC3EncodeContext),
-    ac3_fixed_encode_init,
-    ff_ac3_fixed_encode_frame,
-    ff_ac3_encode_close,
-    NULL,
+    .name           = "ac3_fixed",
+    .type           = AVMEDIA_TYPE_AUDIO,
+    .id             = CODEC_ID_AC3,
+    .priv_data_size = sizeof(AC3EncodeContext),
+    .init           = ac3_fixed_encode_init,
+    .encode         = ff_ac3_fixed_encode_frame,
+    .close          = ff_ac3_encode_close,
     .sample_fmts = (const enum AVSampleFormat[]){AV_SAMPLE_FMT_S16,AV_SAMPLE_FMT_NONE},
     .long_name = NULL_IF_CONFIG_SMALL("ATSC A/52A (AC-3)"),
     .priv_class = &ac3enc_class,

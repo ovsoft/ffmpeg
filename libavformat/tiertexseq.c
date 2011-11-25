@@ -206,7 +206,7 @@ static int seq_read_header(AVFormatContext *s, AVFormatParameters *ap)
     seq->audio_buffer_full = 0;
 
     /* initialize the video decoder stream */
-    st = av_new_stream(s, 0);
+    st = avformat_new_stream(s, NULL);
     if (!st)
         return AVERROR(ENOMEM);
 
@@ -219,7 +219,7 @@ static int seq_read_header(AVFormatContext *s, AVFormatParameters *ap)
     st->codec->height = SEQ_FRAME_H;
 
     /* initialize the audio decoder stream */
-    st = av_new_stream(s, 0);
+    st = avformat_new_stream(s, NULL);
     if (!st)
         return AVERROR(ENOMEM);
 
@@ -303,11 +303,11 @@ static int seq_read_close(AVFormatContext *s)
 }
 
 AVInputFormat ff_tiertexseq_demuxer = {
-    "tiertexseq",
-    NULL_IF_CONFIG_SMALL("Tiertex Limited SEQ format"),
-    sizeof(SeqDemuxContext),
-    seq_probe,
-    seq_read_header,
-    seq_read_packet,
-    seq_read_close,
+    .name           = "tiertexseq",
+    .long_name      = NULL_IF_CONFIG_SMALL("Tiertex Limited SEQ format"),
+    .priv_data_size = sizeof(SeqDemuxContext),
+    .read_probe     = seq_probe,
+    .read_header    = seq_read_header,
+    .read_packet    = seq_read_packet,
+    .read_close     = seq_read_close,
 };

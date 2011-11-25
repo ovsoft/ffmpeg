@@ -67,7 +67,7 @@ static int decode_frame(AVCodecContext *avctx,
     p->pict_type= AV_PICTURE_TYPE_I;
     p->key_frame= 1;
 
-    init_get_bits(&a->gb, buf, buf_size);
+    init_get_bits(&a->gb, buf, buf_size * 8);
 
     for(y=0; y<avctx->height; y++){
         uint8_t *luma= &a->picture.data[0][ y*a->picture.linesize[0] ];
@@ -105,7 +105,7 @@ static int encode_frame(AVCodecContext *avctx, unsigned char *buf, int buf_size,
 
     emms_c();
 
-    align_put_bits(&a->pb);
+    avpriv_align_put_bits(&a->pb);
     while(get_bit_count(&a->pb)&31)
         put_bits(&a->pb, 8, 0);
 
@@ -142,27 +142,24 @@ static av_cold int encode_init(AVCodecContext *avctx){
 #endif
 
 AVCodec ff_cljr_decoder = {
-    "cljr",
-    AVMEDIA_TYPE_VIDEO,
-    CODEC_ID_CLJR,
-    sizeof(CLJRContext),
-    decode_init,
-    NULL,
-    NULL,
-    decode_frame,
-    CODEC_CAP_DR1,
+    .name           = "cljr",
+    .type           = AVMEDIA_TYPE_VIDEO,
+    .id             = CODEC_ID_CLJR,
+    .priv_data_size = sizeof(CLJRContext),
+    .init           = decode_init,
+    .decode         = decode_frame,
+    .capabilities   = CODEC_CAP_DR1,
     .long_name = NULL_IF_CONFIG_SMALL("Cirrus Logic AccuPak"),
 };
 
 #if CONFIG_CLJR_ENCODER
 AVCodec ff_cljr_encoder = {
-    "cljr",
-    AVMEDIA_TYPE_VIDEO,
-    CODEC_ID_CLJR,
-    sizeof(CLJRContext),
-    encode_init,
-    encode_frame,
-    //encode_end,
+    .name           = "cljr",
+    .type           = AVMEDIA_TYPE_VIDEO,
+    .id             = CODEC_ID_CLJR,
+    .priv_data_size = sizeof(CLJRContext),
+    .init           = encode_init,
+    .encode         = encode_frame,
     .long_name = NULL_IF_CONFIG_SMALL("Cirrus Logic AccuPak"),
 };
 #endif

@@ -658,6 +658,7 @@ static int svq1_decode_frame(AVCodecContext *avctx,
     av_dlog(s->avctx, "Error in svq1_decode_frame_header %i\n",result);
     return result;
   }
+  avcodec_set_dimensions(avctx, s->width, s->height);
 
   //FIXME this avoids some confusion for "B frames" without 2 references
   //this should be removed after libavcodec can handle more flexible picture types & ordering
@@ -689,12 +690,12 @@ static int svq1_decode_frame(AVCodecContext *avctx,
       linesize= s->uvlinesize;
     }
 
-    current  = s->current_picture.data[i];
+    current = s->current_picture.f.data[i];
 
     if(s->pict_type==AV_PICTURE_TYPE_B){
-        previous = s->next_picture.data[i];
+        previous = s->next_picture.f.data[i];
     }else{
-        previous = s->last_picture.data[i];
+        previous = s->last_picture.f.data[i];
     }
 
     if (s->pict_type == AV_PICTURE_TYPE_I) {
@@ -808,15 +809,14 @@ static av_cold int svq1_decode_end(AVCodecContext *avctx)
 
 
 AVCodec ff_svq1_decoder = {
-    "svq1",
-    AVMEDIA_TYPE_VIDEO,
-    CODEC_ID_SVQ1,
-    sizeof(MpegEncContext),
-    svq1_decode_init,
-    NULL,
-    svq1_decode_end,
-    svq1_decode_frame,
-    CODEC_CAP_DR1,
+    .name           = "svq1",
+    .type           = AVMEDIA_TYPE_VIDEO,
+    .id             = CODEC_ID_SVQ1,
+    .priv_data_size = sizeof(MpegEncContext),
+    .init           = svq1_decode_init,
+    .close          = svq1_decode_end,
+    .decode         = svq1_decode_frame,
+    .capabilities   = CODEC_CAP_DR1,
     .flush= ff_mpeg_flush,
     .pix_fmts= (const enum PixelFormat[]){PIX_FMT_YUV410P, PIX_FMT_NONE},
     .long_name= NULL_IF_CONFIG_SMALL("Sorenson Vector Quantizer 1 / Sorenson Video 1 / SVQ1"),

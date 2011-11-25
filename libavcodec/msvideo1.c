@@ -296,7 +296,7 @@ static int msvideo1_decode_frame(AVCodecContext *avctx,
     s->buf = buf;
     s->size = buf_size;
 
-    s->frame.reference = 1;
+    s->frame.reference = 3;
     s->frame.buffer_hints = FF_BUFFER_HINTS_VALID | FF_BUFFER_HINTS_PRESERVE | FF_BUFFER_HINTS_REUSABLE;
     if (avctx->reget_buffer(avctx, &s->frame)) {
         av_log(s->avctx, AV_LOG_ERROR, "reget_buffer() failed\n");
@@ -335,14 +335,13 @@ static av_cold int msvideo1_decode_end(AVCodecContext *avctx)
 }
 
 AVCodec ff_msvideo1_decoder = {
-    "msvideo1",
-    AVMEDIA_TYPE_VIDEO,
-    CODEC_ID_MSVIDEO1,
-    sizeof(Msvideo1Context),
-    msvideo1_decode_init,
-    NULL,
-    msvideo1_decode_end,
-    msvideo1_decode_frame,
-    CODEC_CAP_DR1,
+    .name           = "msvideo1",
+    .type           = AVMEDIA_TYPE_VIDEO,
+    .id             = CODEC_ID_MSVIDEO1,
+    .priv_data_size = sizeof(Msvideo1Context),
+    .init           = msvideo1_decode_init,
+    .close          = msvideo1_decode_end,
+    .decode         = msvideo1_decode_frame,
+    .capabilities   = CODEC_CAP_DR1,
     .long_name= NULL_IF_CONFIG_SMALL("Microsoft Video 1"),
 };

@@ -1,5 +1,5 @@
 /*
- * MSMPEG4 backend for ffmpeg encoder and decoder
+ * MSMPEG4 backend for encoder and decoder
  * Copyright (c) 2001 Fabrice Bellard
  * Copyright (c) 2002-2004 Michael Niedermayer <michaelni@gmx.at>
  *
@@ -24,7 +24,7 @@
 
 /**
  * @file
- * MSMPEG4 backend for ffmpeg encoder and decoder.
+ * MSMPEG4 backend for encoder and decoder
  */
 
 #include "avcodec.h"
@@ -61,10 +61,6 @@ static uint32_t v2_dc_chroma_table[512][2];
 
 /* vc1 externs */
 extern const uint8_t wmv3_dc_scale_table[32];
-
-#ifdef DEBUG
-int frame_count = 0;
-#endif
 
 #include "msmpeg4data.h"
 
@@ -270,7 +266,7 @@ av_cold void ff_msmpeg4_encode_init(MpegEncContext *s)
 
         for(i=0; i<NB_RL_TABLES; i++){
             int level;
-            for(level=0; level<=MAX_LEVEL; level++){
+            for (level = 1; level <= MAX_LEVEL; level++) {
                 int run;
                 for(run=0; run<=MAX_RUN; run++){
                     int last;
@@ -355,7 +351,7 @@ void msmpeg4_encode_picture_header(MpegEncContext * s, int picture_number)
 {
     find_best_tables(s);
 
-    align_put_bits(&s->pb);
+    avpriv_align_put_bits(&s->pb);
     put_bits(&s->pb, 2, s->pict_type - 1);
 
     put_bits(&s->pb, 5, s->qscale);
@@ -780,10 +776,10 @@ static inline int msmpeg4_pred_dc(MpegEncContext * s, int n,
             }else{
                 if(n<4){
                     wrap= s->linesize;
-                    dest= s->current_picture.data[0] + (((n>>1) + 2*s->mb_y) * 8*  wrap ) + ((n&1) + 2*s->mb_x) * 8;
+                    dest= s->current_picture.f.data[0] + (((n >> 1) + 2*s->mb_y) * 8*  wrap ) + ((n & 1) + 2*s->mb_x) * 8;
                 }else{
                     wrap= s->uvlinesize;
-                    dest= s->current_picture.data[n-3] + (s->mb_y * 8 * wrap) + s->mb_x * 8;
+                    dest= s->current_picture.f.data[n - 3] + (s->mb_y * 8 * wrap) + s->mb_x * 8;
                 }
                 if(s->mb_x==0) a= (1024 + (scale>>1))/scale;
                 else           a= get_dc(dest-8, wrap, scale*8);
@@ -1172,7 +1168,7 @@ static int msmpeg4v34_decode_mb(MpegEncContext *s, DCTELEM block[6][64])
 {
     int cbp, code, i;
     uint8_t *coded_val;
-    uint32_t * const mb_type_ptr= &s->current_picture.mb_type[ s->mb_x + s->mb_y*s->mb_stride ];
+    uint32_t * const mb_type_ptr = &s->current_picture.f.mb_type[s->mb_x + s->mb_y*s->mb_stride];
 
     if (s->pict_type == AV_PICTURE_TYPE_P) {
         if (s->use_skip_mb_code) {
@@ -1884,60 +1880,56 @@ int ff_msmpeg4_decode_motion(MpegEncContext * s,
 }
 
 AVCodec ff_msmpeg4v1_decoder = {
-    "msmpeg4v1",
-    AVMEDIA_TYPE_VIDEO,
-    CODEC_ID_MSMPEG4V1,
-    sizeof(MpegEncContext),
-    ff_msmpeg4_decode_init,
-    NULL,
-    ff_h263_decode_end,
-    ff_h263_decode_frame,
-    CODEC_CAP_DRAW_HORIZ_BAND | CODEC_CAP_DR1 | CODEC_CAP_EXPERIMENTAL,
+    .name           = "msmpeg4v1",
+    .type           = AVMEDIA_TYPE_VIDEO,
+    .id             = CODEC_ID_MSMPEG4V1,
+    .priv_data_size = sizeof(MpegEncContext),
+    .init           = ff_msmpeg4_decode_init,
+    .close          = ff_h263_decode_end,
+    .decode         = ff_h263_decode_frame,
+    .capabilities   = CODEC_CAP_DRAW_HORIZ_BAND | CODEC_CAP_DR1,
     .max_lowres= 3,
     .long_name= NULL_IF_CONFIG_SMALL("MPEG-4 part 2 Microsoft variant version 1"),
     .pix_fmts= ff_pixfmt_list_420,
 };
 
 AVCodec ff_msmpeg4v2_decoder = {
-    "msmpeg4v2",
-    AVMEDIA_TYPE_VIDEO,
-    CODEC_ID_MSMPEG4V2,
-    sizeof(MpegEncContext),
-    ff_msmpeg4_decode_init,
-    NULL,
-    ff_h263_decode_end,
-    ff_h263_decode_frame,
-    CODEC_CAP_DRAW_HORIZ_BAND | CODEC_CAP_DR1,
+    .name           = "msmpeg4v2",
+    .type           = AVMEDIA_TYPE_VIDEO,
+    .id             = CODEC_ID_MSMPEG4V2,
+    .priv_data_size = sizeof(MpegEncContext),
+    .init           = ff_msmpeg4_decode_init,
+    .close          = ff_h263_decode_end,
+    .decode         = ff_h263_decode_frame,
+    .capabilities   = CODEC_CAP_DRAW_HORIZ_BAND | CODEC_CAP_DR1,
     .max_lowres= 3,
     .long_name= NULL_IF_CONFIG_SMALL("MPEG-4 part 2 Microsoft variant version 2"),
     .pix_fmts= ff_pixfmt_list_420,
 };
 
 AVCodec ff_msmpeg4v3_decoder = {
-    "msmpeg4",
-    AVMEDIA_TYPE_VIDEO,
-    CODEC_ID_MSMPEG4V3,
-    sizeof(MpegEncContext),
-    ff_msmpeg4_decode_init,
-    NULL,
-    ff_h263_decode_end,
-    ff_h263_decode_frame,
-    CODEC_CAP_DRAW_HORIZ_BAND | CODEC_CAP_DR1,
+    .name           = "msmpeg4",
+    .type           = AVMEDIA_TYPE_VIDEO,
+    .id             = CODEC_ID_MSMPEG4V3,
+    .priv_data_size = sizeof(MpegEncContext),
+    .init           = ff_msmpeg4_decode_init,
+    .close          = ff_h263_decode_end,
+    .decode         = ff_h263_decode_frame,
+    .capabilities   = CODEC_CAP_DRAW_HORIZ_BAND | CODEC_CAP_DR1,
     .max_lowres= 3,
     .long_name= NULL_IF_CONFIG_SMALL("MPEG-4 part 2 Microsoft variant version 3"),
     .pix_fmts= ff_pixfmt_list_420,
 };
 
 AVCodec ff_wmv1_decoder = {
-    "wmv1",
-    AVMEDIA_TYPE_VIDEO,
-    CODEC_ID_WMV1,
-    sizeof(MpegEncContext),
-    ff_msmpeg4_decode_init,
-    NULL,
-    ff_h263_decode_end,
-    ff_h263_decode_frame,
-    CODEC_CAP_DRAW_HORIZ_BAND | CODEC_CAP_DR1,
+    .name           = "wmv1",
+    .type           = AVMEDIA_TYPE_VIDEO,
+    .id             = CODEC_ID_WMV1,
+    .priv_data_size = sizeof(MpegEncContext),
+    .init           = ff_msmpeg4_decode_init,
+    .close          = ff_h263_decode_end,
+    .decode         = ff_h263_decode_frame,
+    .capabilities   = CODEC_CAP_DRAW_HORIZ_BAND | CODEC_CAP_DR1,
     .max_lowres= 3,
     .long_name= NULL_IF_CONFIG_SMALL("Windows Media Video 7"),
     .pix_fmts= ff_pixfmt_list_420,

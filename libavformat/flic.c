@@ -105,7 +105,7 @@ static int flic_read_header(AVFormatContext *s,
         speed = FLIC_DEFAULT_SPEED;
 
     /* initialize the decoder streams */
-    st = av_new_stream(s, 0);
+    st = avformat_new_stream(s, NULL);
     if (!st)
         return AVERROR(ENOMEM);
     flic->video_stream_index = st->index;
@@ -145,7 +145,7 @@ static int flic_read_header(AVFormatContext *s,
      */
     if (AV_RL16(&preamble[4]) == FLIC_TFTD_CHUNK_AUDIO) {
         /* TFTD videos have an extra 22050 Hz 8-bit mono audio stream */
-        ast = av_new_stream(s, 1);
+        ast = avformat_new_stream(s, NULL);
         if (!ast)
             return AVERROR(ENOMEM);
 
@@ -261,10 +261,10 @@ static int flic_read_packet(AVFormatContext *s,
 }
 
 AVInputFormat ff_flic_demuxer = {
-    "flic",
-    NULL_IF_CONFIG_SMALL("FLI/FLC/FLX animation format"),
-    sizeof(FlicDemuxContext),
-    flic_probe,
-    flic_read_header,
-    flic_read_packet,
+    .name           = "flic",
+    .long_name      = NULL_IF_CONFIG_SMALL("FLI/FLC/FLX animation format"),
+    .priv_data_size = sizeof(FlicDemuxContext),
+    .read_probe     = flic_probe,
+    .read_header    = flic_read_header,
+    .read_packet    = flic_read_packet,
 };

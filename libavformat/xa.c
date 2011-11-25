@@ -70,7 +70,7 @@ static int xa_read_header(AVFormatContext *s,
     AVStream *st;
 
     /*Set up the XA Audio Decoder*/
-    st = av_new_stream(s, 0);
+    st = avformat_new_stream(s, NULL);
     if (!st)
         return AVERROR(ENOMEM);
 
@@ -119,10 +119,10 @@ static int xa_read_packet(AVFormatContext *s,
 }
 
 AVInputFormat ff_xa_demuxer = {
-    "xa",
-    NULL_IF_CONFIG_SMALL("Maxis XA File Format"),
-    sizeof(MaxisXADemuxContext),
-    xa_probe,
-    xa_read_header,
-    xa_read_packet,
+    .name           = "xa",
+    .long_name      = NULL_IF_CONFIG_SMALL("Maxis XA File Format"),
+    .priv_data_size = sizeof(MaxisXADemuxContext),
+    .read_probe     = xa_probe,
+    .read_header    = xa_read_header,
+    .read_packet    = xa_read_packet,
 };

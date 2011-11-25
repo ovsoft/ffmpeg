@@ -33,7 +33,7 @@
 #include <alsa/asoundlib.h>
 #include "config.h"
 #include "libavutil/log.h"
-#include "libavformat/timefilter.h"
+#include "timefilter.h"
 #include "avdevice.h"
 
 /* XXX: we make the assumption that the soundcard accepts this format */
@@ -42,6 +42,8 @@
 #define DEFAULT_CODEC_ID AV_NE(CODEC_ID_PCM_S16BE, CODEC_ID_PCM_S16LE)
 
 typedef void (*ff_reorder_func)(const void *, void *, int);
+
+#define ALSA_BUFFER_SIZE_MAX 65536
 
 typedef struct {
     AVClass *class;

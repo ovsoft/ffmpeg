@@ -59,7 +59,7 @@ static av_cold int mm_decode_init(AVCodecContext *avctx)
     avctx->pix_fmt = PIX_FMT_PAL8;
 
     avcodec_get_frame_defaults(&s->frame);
-    s->frame.reference = 1;
+    s->frame.reference = 3;
 
     return 0;
 }
@@ -69,7 +69,7 @@ static void mm_decode_pal(MmContext *s, const uint8_t *buf, const uint8_t *buf_e
     int i;
     buf += 4;
     for (i=0; i<128 && buf+2<buf_end; i++) {
-        s->palette[i] = AV_RB24(buf);
+        s->palette[i] = 0xFF << 24 | AV_RB24(buf);
         s->palette[i+128] = s->palette[i]<<2;
         buf += 3;
     }
@@ -215,14 +215,13 @@ static av_cold int mm_decode_end(AVCodecContext *avctx)
 }
 
 AVCodec ff_mmvideo_decoder = {
-    "mmvideo",
-    AVMEDIA_TYPE_VIDEO,
-    CODEC_ID_MMVIDEO,
-    sizeof(MmContext),
-    mm_decode_init,
-    NULL,
-    mm_decode_end,
-    mm_decode_frame,
-    CODEC_CAP_DR1,
+    .name           = "mmvideo",
+    .type           = AVMEDIA_TYPE_VIDEO,
+    .id             = CODEC_ID_MMVIDEO,
+    .priv_data_size = sizeof(MmContext),
+    .init           = mm_decode_init,
+    .close          = mm_decode_end,
+    .decode         = mm_decode_frame,
+    .capabilities   = CODEC_CAP_DR1,
     .long_name = NULL_IF_CONFIG_SMALL("American Laser Games MM Video"),
 };

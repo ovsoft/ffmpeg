@@ -1284,8 +1284,8 @@ static int decode_cabac_field_decoding_flag(H264Context *h) {
 
     unsigned long ctx = 0;
 
-    ctx += h->mb_field_decoding_flag & !!s->mb_x; //for FMO:(s->current_picture.mb_type[mba_xy]>>7)&(h->slice_table[mba_xy] == h->slice_num);
-    ctx += (s->current_picture.mb_type[mbb_xy]>>7)&(h->slice_table[mbb_xy] == h->slice_num);
+    ctx += h->mb_field_decoding_flag & !!s->mb_x; //for FMO:(s->current_picture.f.mb_type[mba_xy] >> 7) & (h->slice_table[mba_xy] == h->slice_num);
+    ctx += (s->current_picture.f.mb_type[mbb_xy] >> 7) & (h->slice_table[mbb_xy] == h->slice_num);
 
     return get_cabac_noinline( &h->cabac, &(h->cabac_state+70)[ctx] );
 }
@@ -1330,13 +1330,13 @@ static int decode_cabac_mb_skip( H264Context *h, int mb_x, int mb_y ) {
         mba_xy = mb_xy - 1;
         if( (mb_y&1)
             && h->slice_table[mba_xy] == h->slice_num
-            && MB_FIELD == !!IS_INTERLACED( s->current_picture.mb_type[mba_xy] ) )
+            && MB_FIELD == !!IS_INTERLACED( s->current_picture.f.mb_type[mba_xy] ) )
             mba_xy += s->mb_stride;
         if( MB_FIELD ){
             mbb_xy = mb_xy - s->mb_stride;
             if( !(mb_y&1)
                 && h->slice_table[mbb_xy] == h->slice_num
-                && IS_INTERLACED( s->current_picture.mb_type[mbb_xy] ) )
+                && IS_INTERLACED( s->current_picture.f.mb_type[mbb_xy] ) )
                 mbb_xy -= s->mb_stride;
         }else
             mbb_xy = mb_x + (mb_y-1)*s->mb_stride;
@@ -1346,9 +1346,9 @@ static int decode_cabac_mb_skip( H264Context *h, int mb_x, int mb_y ) {
         mbb_xy = mb_xy - (s->mb_stride << FIELD_PICTURE);
     }
 
-    if( h->slice_table[mba_xy] == h->slice_num && !IS_SKIP( s->current_picture.mb_type[mba_xy] ))
+    if( h->slice_table[mba_xy] == h->slice_num && !IS_SKIP( s->current_picture.f.mb_type[mba_xy] ))
         ctx++;
-    if( h->slice_table[mbb_xy] == h->slice_num && !IS_SKIP( s->current_picture.mb_type[mbb_xy] ))
+    if( h->slice_table[mbb_xy] == h->slice_num && !IS_SKIP( s->current_picture.f.mb_type[mbb_xy] ))
         ctx++;
 
     if( h->slice_type_nos == AV_PICTURE_TYPE_B )
@@ -1565,7 +1565,12 @@ DECLARE_ASM_CONST(1, uint8_t, last_coeff_flag_offset_8x8)[63] = {
     5, 5, 5, 5, 6, 6, 6, 6, 7, 7, 7, 7, 8, 8, 8
 };
 
-static av_always_inline void decode_cabac_residual_internal( H264Context *h, DCTELEM *block, int cat, int n, const uint8_t *scantable, const uint32_t *qmul, int max_coeff, int is_dc ) {
+static av_always_inline void
+decode_cabac_residual_internal(H264Context *h, DCTELEM *block,
+                               int cat, int n, const uint8_t *scantable,
+                               const uint32_t *qmul, int max_coeff,
+                               int is_dc, int chroma422)
+{
     static const int significant_coeff_flag_offset[2][14] = {
       { 105+0, 105+15, 105+29, 105+44, 105+47, 402, 484+0, 484+15, 484+29, 660, 528+0, 528+15, 528+29, 718 },
       { 277+0, 277+15, 277+29, 277+44, 277+47, 436, 776+0, 776+15, 776+29, 675, 820+0, 820+15, 820+29, 733 }
@@ -1587,12 +1592,16 @@ static av_always_inline void decode_cabac_residual_internal( H264Context *h, DCT
         9, 9,10,10, 8,11,12,11, 9, 9,10,10, 8,13,13, 9,
         9,10,10, 8,13,13, 9, 9,10,10,14,14,14,14,14 }
     };
+    static const uint8_t sig_coeff_offset_dc[7] = { 0, 0, 1, 1, 2, 2, 2 };
     /* node ctx: 0..3: abslevel1 (with abslevelgt1 == 0).
      * 4..7: abslevelgt1 + 3 (and abslevel1 doesn't matter).
      * map node ctx => cabac ctx for level=1 */
     static const uint8_t coeff_abs_level1_ctx[8] = { 1, 2, 3, 4, 0, 0, 0, 0 };
     /* map node ctx => cabac ctx for level>1 */
-    static const uint8_t coeff_abs_levelgt1_ctx[8] = { 5, 5, 5, 5, 6, 7, 8, 9 };
+    static const uint8_t coeff_abs_levelgt1_ctx[2][8] = {
+        { 5, 5, 5, 5, 6, 7, 8, 9 },
+        { 5, 5, 5, 5, 6, 7, 8, 8 }, // 422/dc case
+    };
     static const uint8_t coeff_abs_level_transition[2][8] = {
     /* update node ctx after decoding a level=1 */
         { 1, 2, 3, 3, 4, 5, 6, 7 },
@@ -1649,14 +1658,22 @@ static av_always_inline void decode_cabac_residual_internal( H264Context *h, DCT
         const uint8_t *sig_off = significant_coeff_flag_offset_8x8[MB_FIELD];
 #if ARCH_X86 && HAVE_7REGS && HAVE_EBX_AVAILABLE && !defined(BROKEN_RELOCATIONS)
         coeff_count= decode_significance_8x8_x86(CC, significant_coeff_ctx_base, index,
-                                                 last_coeff_ctx_base-significant_coeff_ctx_base, sig_off);
+                                                 last_coeff_ctx_base, sig_off);
     } else {
-        coeff_count= decode_significance_x86(CC, max_coeff, significant_coeff_ctx_base, index,
-                                             last_coeff_ctx_base-significant_coeff_ctx_base);
+        if (is_dc && chroma422) { // dc 422
+            DECODE_SIGNIFICANCE(7, sig_coeff_offset_dc[last], sig_coeff_offset_dc[last]);
+        } else {
+            coeff_count= decode_significance_x86(CC, max_coeff, significant_coeff_ctx_base, index,
+                                                 last_coeff_ctx_base-significant_coeff_ctx_base);
+        }
 #else
         DECODE_SIGNIFICANCE( 63, sig_off[last], last_coeff_flag_offset_8x8[last] );
     } else {
-        DECODE_SIGNIFICANCE( max_coeff - 1, last, last );
+        if (is_dc && chroma422) { // dc 422
+            DECODE_SIGNIFICANCE(7, sig_coeff_offset_dc[last], sig_coeff_offset_dc[last]);
+        } else {
+            DECODE_SIGNIFICANCE(max_coeff - 1, last, last);
+        }
 #endif
     }
     assert(coeff_count > 0);
@@ -1692,7 +1709,7 @@ static av_always_inline void decode_cabac_residual_internal( H264Context *h, DCT
             } \
         } else { \
             int coeff_abs = 2; \
-            ctx = coeff_abs_levelgt1_ctx[node_ctx] + abs_level_m1_ctx_base; \
+            ctx = coeff_abs_levelgt1_ctx[is_dc && chroma422][node_ctx] + abs_level_m1_ctx_base; \
             node_ctx = coeff_abs_level_transition[1][node_ctx]; \
 \
             while( coeff_abs < 15 && get_cabac( CC, ctx ) ) { \
@@ -1734,11 +1751,18 @@ static av_always_inline void decode_cabac_residual_internal( H264Context *h, DCT
 }
 
 static void decode_cabac_residual_dc_internal( H264Context *h, DCTELEM *block, int cat, int n, const uint8_t *scantable, int max_coeff ) {
-    decode_cabac_residual_internal(h, block, cat, n, scantable, NULL, max_coeff, 1);
+    decode_cabac_residual_internal(h, block, cat, n, scantable, NULL, max_coeff, 1, 0);
+}
+
+static void decode_cabac_residual_dc_internal_422(H264Context *h, DCTELEM *block,
+                                                  int cat, int n, const uint8_t *scantable,
+                                                  int max_coeff)
+{
+    decode_cabac_residual_internal(h, block, cat, n, scantable, NULL, max_coeff, 1, 1);
 }
 
 static void decode_cabac_residual_nondc_internal( H264Context *h, DCTELEM *block, int cat, int n, const uint8_t *scantable, const uint32_t *qmul, int max_coeff ) {
-    decode_cabac_residual_internal(h, block, cat, n, scantable, qmul, max_coeff, 0);
+    decode_cabac_residual_internal(h, block, cat, n, scantable, qmul, max_coeff, 0, 0);
 }
 
 /* cat: 0-> DC 16x16  n = 0
@@ -1760,6 +1784,19 @@ static av_always_inline void decode_cabac_residual_dc( H264Context *h, DCTELEM *
         return;
     }
     decode_cabac_residual_dc_internal( h, block, cat, n, scantable, max_coeff );
+}
+
+static av_always_inline void
+decode_cabac_residual_dc_422(H264Context *h, DCTELEM *block,
+                             int cat, int n, const uint8_t *scantable,
+                             int max_coeff)
+{
+    /* read coded block flag */
+    if (get_cabac(&h->cabac, &h->cabac_state[get_cabac_cbf_ctx(h, cat, n, max_coeff, 1)]) == 0) {
+        h->non_zero_count_cache[scan8[n]] = 0;
+        return;
+    }
+    decode_cabac_residual_dc_internal_422(h, block, cat, n, scantable, max_coeff);
 }
 
 static av_always_inline void decode_cabac_residual_nondc( H264Context *h, DCTELEM *block, int cat, int n, const uint8_t *scantable, const uint32_t *qmul, int max_coeff ) {
@@ -1819,8 +1856,7 @@ static av_always_inline void decode_cabac_luma_residual( H264Context *h, const u
                     }
                 }
             } else {
-                uint8_t * const nnz= &h->non_zero_count_cache[ scan8[4*i8x8+16*p] ];
-                nnz[0] = nnz[1] = nnz[8] = nnz[9] = 0;
+                fill_rectangle(&h->non_zero_count_cache[scan8[4*i8x8+16*p]], 2, 2, 8, 0, 1);
             }
         }
     }
@@ -1851,7 +1887,7 @@ int ff_h264_decode_mb_cabac(H264Context *h) {
         /* read skip flags */
         if( skip ) {
             if( FRAME_MBAFF && (s->mb_y&1)==0 ){
-                s->current_picture.mb_type[mb_xy] = MB_TYPE_SKIP;
+                s->current_picture.f.mb_type[mb_xy] = MB_TYPE_SKIP;
                 h->next_mb_skipped = decode_cabac_mb_skip( h, s->mb_x, s->mb_y+1 );
                 if(!h->next_mb_skipped)
                     h->mb_mbaff = h->mb_field_decoding_flag = decode_cabac_field_decoding_flag(h);
@@ -1967,10 +2003,10 @@ decode_intra_mb:
         h->cbp_table[mb_xy] = 0xf7ef;
         h->chroma_pred_mode_table[mb_xy] = 0;
         // In deblocking, the quantizer is 0
-        s->current_picture.qscale_table[mb_xy]= 0;
+        s->current_picture.f.qscale_table[mb_xy] = 0;
         // All coeffs are present
         memset(h->non_zero_count[mb_xy], 16, 48);
-        s->current_picture.mb_type[mb_xy]= mb_type;
+        s->current_picture.f.mb_type[mb_xy] = mb_type;
         h->last_qscale_diff = 0;
         return 0;
     }
@@ -2003,14 +2039,14 @@ decode_intra_mb:
             write_back_intra_pred_mode(h);
             if( ff_h264_check_intra4x4_pred_mode(h) < 0 ) return -1;
         } else {
-            h->intra16x16_pred_mode= ff_h264_check_intra_pred_mode( h, h->intra16x16_pred_mode );
+            h->intra16x16_pred_mode= ff_h264_check_intra16x16_pred_mode( h, h->intra16x16_pred_mode );
             if( h->intra16x16_pred_mode < 0 ) return -1;
         }
         if(decode_chroma){
             h->chroma_pred_mode_table[mb_xy] =
             pred_mode                        = decode_cabac_mb_chroma_pre_mode( h );
 
-            pred_mode= ff_h264_check_intra_pred_mode( h, pred_mode );
+            pred_mode= ff_h264_check_intra_chroma_pred_mode( h, pred_mode );
             if( pred_mode < 0 ) return -1;
             h->chroma_pred_mode= pred_mode;
         } else {
@@ -2267,7 +2303,7 @@ decode_intra_mb:
             AV_WN32A(&nnz_cache[4+8*10], top_empty);
         }
     }
-    s->current_picture.mb_type[mb_xy]= mb_type;
+    s->current_picture.f.mb_type[mb_xy] = mb_type;
 
     if( cbp || IS_INTRA16x16( mb_type ) ) {
         const uint8_t *scan, *scan8x8;
@@ -2315,7 +2351,36 @@ decode_intra_mb:
         if(CHROMA444){
             decode_cabac_luma_residual(h, scan, scan8x8, pixel_shift, mb_type, cbp, 1);
             decode_cabac_luma_residual(h, scan, scan8x8, pixel_shift, mb_type, cbp, 2);
-        } else {
+        } else if (CHROMA422) {
+            if( cbp&0x30 ){
+                int c;
+                for( c = 0; c < 2; c++ ) {
+                    //av_log( s->avctx, AV_LOG_ERROR, "INTRA C%d-DC\n",c );
+                    decode_cabac_residual_dc_422(h, h->mb + ((256 + 16*16*c) << pixel_shift), 3,
+                                                 CHROMA_DC_BLOCK_INDEX + c,
+                                                 chroma422_dc_scan, 8);
+                }
+            }
+
+            if( cbp&0x20 ) {
+                int c, i, i8x8;
+                for( c = 0; c < 2; c++ ) {
+                    DCTELEM *mb = h->mb + (16*(16 + 16*c) << pixel_shift);
+                    qmul = h->dequant4_coeff[c+1+(IS_INTRA( mb_type ) ? 0:3)][h->chroma_qp[c]];
+                    for (i8x8 = 0; i8x8 < 2; i8x8++) {
+                        for (i = 0; i < 4; i++) {
+                            const int index = 16 + 16 * c + 8*i8x8 + i;
+                            //av_log(s->avctx, AV_LOG_ERROR, "INTRA C%d-AC %d\n",c, index - 16);
+                            decode_cabac_residual_nondc(h, mb, 4, index, scan + 1, qmul, 15);
+                            mb += 16<<pixel_shift;
+                        }
+                    }
+                }
+            } else {
+                fill_rectangle(&h->non_zero_count_cache[scan8[16]], 4, 4, 8, 0, 1);
+                fill_rectangle(&h->non_zero_count_cache[scan8[32]], 4, 4, 8, 0, 1);
+            }
+        } else /* yuv420 */ {
             if( cbp&0x30 ){
                 int c;
                 for( c = 0; c < 2; c++ ) {
@@ -2346,7 +2411,7 @@ decode_intra_mb:
         h->last_qscale_diff = 0;
     }
 
-    s->current_picture.qscale_table[mb_xy]= s->qscale;
+    s->current_picture.f.qscale_table[mb_xy] = s->qscale;
     write_back_non_zero_count(h);
 
     if(MB_MBAFF){

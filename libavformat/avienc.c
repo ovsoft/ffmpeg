@@ -523,6 +523,11 @@ static int avi_write_packet(AVFormatContext *s, AVPacket *pkt)
     while(enc->block_align==0 && pkt->dts != AV_NOPTS_VALUE && pkt->dts > avist->packet_count){
         AVPacket empty_packet;
 
+        if(pkt->dts - avist->packet_count > 60000){
+            av_log(s, AV_LOG_ERROR, "Too large number of skiped frames %Ld\n", pkt->dts - avist->packet_count);
+            return AVERROR(EINVAL);
+        }
+
         av_init_packet(&empty_packet);
         empty_packet.size= 0;
         empty_packet.data= NULL;
@@ -558,7 +563,7 @@ static int avi_write_packet(AVFormatContext *s, AVPacket *pkt)
         int cl = idx->entry / AVI_INDEX_CLUSTER_SIZE;
         int id = idx->entry % AVI_INDEX_CLUSTER_SIZE;
         if (idx->ents_allocated <= idx->entry) {
-            idx->cluster = av_realloc(idx->cluster, (cl+1)*sizeof(void*));
+            idx->cluster = av_realloc_f(idx->cluster, sizeof(void*), cl+1);
             if (!idx->cluster)
                 return -1;
             idx->cluster[cl] = av_malloc(AVI_INDEX_CLUSTER_SIZE*sizeof(AVIIentry));
@@ -639,16 +644,20 @@ static int avi_write_trailer(AVFormatContext *s)
 }
 
 AVOutputFormat ff_avi_muxer = {
-    "avi",
-    NULL_IF_CONFIG_SMALL("AVI format"),
-    "video/x-msvideo",
-    "avi",
-    sizeof(AVIContext),
-    CODEC_ID_MP2,
-    CODEC_ID_MPEG4,
-    avi_write_header,
-    avi_write_packet,
-    avi_write_trailer,
+    .name              = "avi",
+    .long_name         = NULL_IF_CONFIG_SMALL("AVI format"),
+    .mime_type         = "video/x-msvideo",
+    .extensions        = "avi",
+    .priv_data_size    = sizeof(AVIContext),
+#if CONFIG_LIBMP3LAME_ENCODER
+    .audio_codec       = CODEC_ID_MP3,
+#else
+    .audio_codec       = CODEC_ID_AC3,
+#endif
+    .video_codec       = CODEC_ID_MPEG4,
+    .write_header      = avi_write_header,
+    .write_packet      = avi_write_packet,
+    .write_trailer     = avi_write_trailer,
     .codec_tag= (const AVCodecTag* const []){ff_codec_bmp_tags, ff_codec_wav_tags, 0},
     .flags= AVFMT_VARIABLE_FPS,
 };

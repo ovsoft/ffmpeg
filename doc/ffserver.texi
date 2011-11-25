@@ -110,8 +110,8 @@ As a simple test, just run the following two command lines where INPUTFILE
 is some file which you can decode with ffmpeg:
 
 @example
-./ffserver -f doc/ffserver.conf &
-./ffmpeg -i INPUTFILE http://localhost:8090/feed1.ffm
+ffserver -f doc/ffserver.conf &
+ffmpeg -i INPUTFILE http://localhost:8090/feed1.ffm
 @end example
 
 At this point you should be able to go to your Windows machine and fire up
@@ -240,7 +240,7 @@ For example:   @samp{http://localhost:8080/test.asf?date=2002-07-26T23:05:00}.
 @chapter Options
 @c man begin OPTIONS
 
-@include fftools-common-opts.texi
+@include avtools-common-opts.texi
 
 @section Main options
 

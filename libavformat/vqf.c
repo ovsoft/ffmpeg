@@ -64,12 +64,13 @@ static void add_metadata(AVFormatContext *s, const char *tag,
 static int vqf_read_header(AVFormatContext *s, AVFormatParameters *ap)
 {
     VqfContext *c = s->priv_data;
-    AVStream *st  = av_new_stream(s, 0);
+    AVStream *st  = avformat_new_stream(s, NULL);
     int chunk_tag;
     int rate_flag = -1;
     int header_size;
     int read_bitrate = 0;
     int size;
+    uint8_t comm_chunk[12];
 
     if (!st)
         return AVERROR(ENOMEM);
@@ -100,13 +101,13 @@ static int vqf_read_header(AVFormatContext *s, AVFormatParameters *ap)
 
         switch(chunk_tag){
         case MKTAG('C','O','M','M'):
-            st->codec->channels = avio_rb32(s->pb) + 1;
-            read_bitrate        = avio_rb32(s->pb);
-            rate_flag           = avio_rb32(s->pb);
+            avio_read(s->pb, comm_chunk, 12);
+            st->codec->channels = AV_RB32(comm_chunk    ) + 1;
+            read_bitrate        = AV_RB32(comm_chunk + 4);
+            rate_flag           = AV_RB32(comm_chunk + 8);
             avio_skip(s->pb, len-12);
 
             st->codec->bit_rate              = read_bitrate*1000;
-            st->codec->bits_per_coded_sample = 16;
             break;
         case MKTAG('N','A','M','E'):
             add_metadata(s, "title"    , len, header_size);
@@ -193,6 +194,12 @@ static int vqf_read_header(AVFormatContext *s, AVFormatParameters *ap)
     c->frame_bit_len = st->codec->bit_rate*size/st->codec->sample_rate;
     av_set_pts_info(st, 64, 1, st->codec->sample_rate);
 
+    /* put first 12 bytes of COMM chunk in extradata */
+    if (!(st->codec->extradata = av_malloc(12 + FF_INPUT_BUFFER_PADDING_SIZE)))
+        return AVERROR(ENOMEM);
+    st->codec->extradata_size = 12;
+    memcpy(st->codec->extradata, comm_chunk, 12);
+
     return 0;
 }
 
@@ -250,13 +257,12 @@ static int vqf_read_seek(AVFormatContext *s,
 }
 
 AVInputFormat ff_vqf_demuxer = {
-    "vqf",
-    NULL_IF_CONFIG_SMALL("Nippon Telegraph and Telephone Corporation (NTT) TwinVQ"),
-    sizeof(VqfContext),
-    vqf_probe,
-    vqf_read_header,
-    vqf_read_packet,
-    NULL,
-    vqf_read_seek,
+    .name           = "vqf",
+    .long_name      = NULL_IF_CONFIG_SMALL("Nippon Telegraph and Telephone Corporation (NTT) TwinVQ"),
+    .priv_data_size = sizeof(VqfContext),
+    .read_probe     = vqf_probe,
+    .read_header    = vqf_read_header,
+    .read_packet    = vqf_read_packet,
+    .read_seek      = vqf_read_seek,
     .extensions = "vqf",
 };

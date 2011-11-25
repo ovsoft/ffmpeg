@@ -1,5 +1,5 @@
 /*
- * MSMPEG4 backend for ffmpeg encoder and decoder
+ * MSMPEG4 backend for encoder and decoder
  * copyright (c) 2007 Aurelien Jacobs <aurel@gnuage.org>
  *
  * This file is part of FFmpeg.
@@ -17,10 +17,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with FFmpeg; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
- */
-
-/**
- * @file
  */
 
 #ifndef AVCODEC_MSMPEG4_H

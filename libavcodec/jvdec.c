@@ -150,7 +150,7 @@ static int decode_frame(AVCodecContext *avctx,
 
         if (video_type == 0 || video_type == 1) {
             GetBitContext gb;
-            init_get_bits(&gb, buf, FFMIN(video_size, buf_end - buf));
+            init_get_bits(&gb, buf, FFMIN(video_size, (buf_end - buf) * 8));
 
             for (j = 0; j < avctx->height; j += 8)
                 for (i = 0; i < avctx->width; i += 8)
@@ -172,7 +172,8 @@ static int decode_frame(AVCodecContext *avctx,
 
     if (buf < buf_end) {
         for (i = 0; i < AVPALETTE_COUNT && buf + 3 <= buf_end; i++) {
-            s->palette[i] = AV_RB24(buf) << 2;
+            uint32_t pal = AV_RB24(buf);
+            s->palette[i] = 0xFF << 24 | pal << 2 | ((pal >> 4) & 0x30303);
             buf += 3;
         }
         s->palette_has_changed = 1;

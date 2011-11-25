@@ -10,7 +10,7 @@ ifndef SUBDIR
 ifndef V
 Q      = @
 ECHO   = printf "$(1)\t%s\n" $(2)
-BRIEF  = CC AS YASM AR LD HOSTCC STRIP CP
+BRIEF  = CC CXX AS YASM AR LD HOSTCC STRIP CP
 SILENT = DEPCC YASMDEP RM RANLIB
 MSG    = $@
 M      = @$(call ECHO,$(TAG),$@);
@@ -20,13 +20,17 @@ $(foreach VAR,$(SILENT),$(eval override $(VAR) = @$($(VAR))))
 $(eval INSTALL = @$(call ECHO,INSTALL,$$(^:$(SRC_DIR)/%=%)); $(INSTALL))
 endif
 
+ALLFFLIBS = avcodec avdevice avfilter avformat avutil postproc swscale swresample
+
 # NASM requires -I path terminated with /
 IFLAGS     := -I. -I$(SRC_PATH)/
 CPPFLAGS   := $(IFLAGS) $(CPPFLAGS)
 CFLAGS     += $(ECFLAGS)
 CCFLAGS     = $(CFLAGS)
-YASMFLAGS  += $(IFLAGS) -Pconfig.asm
+CXXFLAGS   := $(CFLAGS) $(CXXFLAGS)
+YASMFLAGS  += $(IFLAGS) -I$(SRC_PATH)/libavutil/x86/ -Pconfig.asm
 HOSTCFLAGS += $(IFLAGS)
+LDFLAGS    := $(ALLFFLIBS:%=-Llib%) $(LDFLAGS)
 
 define COMPILE
        $($(1)DEP)
@@ -34,10 +38,17 @@ define COMPILE
 endef
 
 COMPILE_C = $(call COMPILE,CC)
+COMPILE_CXX = $(call COMPILE,CXX)
 COMPILE_S = $(call COMPILE,AS)
 
 %.o: %.c
 	$(COMPILE_C)
+
+%.o: %.cpp
+	$(COMPILE_CXX)
+
+%.s: %.c
+	$(CC) $(CPPFLAGS) $(CFLAGS) -S -o $@ $<
 
 %.o: %.S
 	$(COMPILE_S)
@@ -69,7 +80,6 @@ FFLIBS    := $(FFLIBS-yes) $(FFLIBS)
 TESTPROGS += $(TESTPROGS-yes)
 
 FFEXTRALIBS := $(FFLIBS:%=-l%$(BUILDSUF)) $(EXTRALIBS)
-FFLDFLAGS   := $(ALLFFLIBS:%=-Llib%) $(LDFLAGS)
 
 EXAMPLES  := $(EXAMPLES:%=$(SUBDIR)%-example$(EXESUF))
 OBJS      := $(sort $(OBJS:%=$(SUBDIR)%))
@@ -77,6 +87,9 @@ TESTOBJS  := $(TESTOBJS:%=$(SUBDIR)%) $(TESTPROGS:%=$(SUBDIR)%-test.o)
 TESTPROGS := $(TESTPROGS:%=$(SUBDIR)%-test$(EXESUF))
 HOSTOBJS  := $(HOSTPROGS:%=$(SUBDIR)%.o)
 HOSTPROGS := $(HOSTPROGS:%=$(SUBDIR)%$(HOSTEXESUF))
+TOOLS     += $(TOOLS-yes)
+TOOLOBJS  := $(TOOLS:%=tools/%.o)
+TOOLS     := $(TOOLS:%=tools/%$(EXESUF))
 
 DEP_LIBS := $(foreach NAME,$(FFLIBS),lib$(NAME)/$($(CONFIG_SHARED:yes=S)LIBNAME))
 
@@ -85,15 +98,18 @@ SKIPHEADERS += $(ARCH_HEADERS:%=$(ARCH)/%) $(SKIPHEADERS-)
 SKIPHEADERS := $(SKIPHEADERS:%=$(SUBDIR)%)
 checkheaders: $(filter-out $(SKIPHEADERS:.h=.ho),$(ALLHEADERS:.h=.ho))
 
+alltools: $(TOOLS)
+
 $(HOSTOBJS): %.o: %.c
 	$(HOSTCC) $(HOSTCFLAGS) -c -o $@ $<
 
 $(HOSTPROGS): %$(HOSTEXESUF): %.o
 	$(HOSTCC) $(HOSTLDFLAGS) -o $@ $< $(HOSTLIBS)
 
-$(OBJS):     | $(dir $(OBJS))
-$(HOSTOBJS): | $(dir $(HOSTOBJS))
-$(TESTOBJS): | $(dir $(TESTOBJS))
+$(OBJS):     | $(sort $(dir $(OBJS)))
+$(HOSTOBJS): | $(sort $(dir $(HOSTOBJS)))
+$(TESTOBJS): | $(sort $(dir $(TESTOBJS)))
+$(TOOLOBJS): | tools
 
 OBJDIRS := $(OBJDIRS) $(dir $(OBJS) $(HOSTOBJS) $(TESTOBJS))
 

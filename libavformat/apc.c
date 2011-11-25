@@ -39,7 +39,7 @@ static int apc_read_header(AVFormatContext *s, AVFormatParameters *ap)
     avio_rl32(pb); /* _APC */
     avio_rl32(pb); /* 1.20 */
 
-    st = av_new_stream(s, 0);
+    st = avformat_new_stream(s, NULL);
     if (!st)
         return AVERROR(ENOMEM);
 
@@ -81,10 +81,9 @@ static int apc_read_packet(AVFormatContext *s, AVPacket *pkt)
 }
 
 AVInputFormat ff_apc_demuxer = {
-    "apc",
-    NULL_IF_CONFIG_SMALL("CRYO APC format"),
-    0,
-    apc_probe,
-    apc_read_header,
-    apc_read_packet,
+    .name           = "apc",
+    .long_name      = NULL_IF_CONFIG_SMALL("CRYO APC format"),
+    .read_probe     = apc_probe,
+    .read_header    = apc_read_header,
+    .read_packet    = apc_read_packet,
 };

@@ -29,7 +29,15 @@
  * audio conversion routines
  */
 
-/* Audio channel masks */
+/**
+ * @addtogroup lavu_audio
+ * @{
+ */
+
+/**
+ * @defgroup channel_masks Audio channel masks
+ * @{
+ */
 #define AV_CH_FRONT_LEFT             0x00000001
 #define AV_CH_FRONT_RIGHT            0x00000002
 #define AV_CH_FRONT_CENTER           0x00000004
@@ -56,7 +64,11 @@
     to be the native codec channel order. */
 #define AV_CH_LAYOUT_NATIVE          0x8000000000000000LL
 
-/* Audio channel convenience macros */
+/**
+ * @}
+ * @defgroup channel_mask_c Audio channel convenience macros
+ * @{
+ * */
 #define AV_CH_LAYOUT_MONO              (AV_CH_FRONT_CENTER)
 #define AV_CH_LAYOUT_STEREO            (AV_CH_FRONT_LEFT|AV_CH_FRONT_RIGHT)
 #define AV_CH_LAYOUT_2_1               (AV_CH_LAYOUT_STEREO|AV_CH_BACK_CENTER)
@@ -74,7 +86,23 @@
 #define AV_CH_LAYOUT_STEREO_DOWNMIX    (AV_CH_STEREO_LEFT|AV_CH_STEREO_RIGHT)
 
 /**
+ * @}
+ */
+
+/**
  * Return a channel layout id that matches name, 0 if no match.
+ * name can be one or several of the following notations,
+ * separated by '+' or '|':
+ * - the name of an usual channel layout (mono, stereo, 4.0, quad, 5.0,
+ *   5.0(side), 5.1, 5.1(side), 7.1, 7.1(wide), downmix);
+ * - the name of a single channel (FL, FR, FC, LFE, BL, BR, FLC, FRC, BC,
+ *   SL, SR, TC, TFL, TFC, TFR, TBL, TBC, TBR, DL, DR);
+ * - a number of channels, in decimal, optionnally followed by 'c', yielding
+ *   the default channel layout for that number of channels (@see
+ *   av_get_default_channel_layout);
+ * - a channel layout mask, in hexadecimal starting with "0x" (see the
+ *   AV_CH_* macros).
+ + Example: "stereo+FC" = "2+FC" = "2c+1c" = "0x7"
  */
 int64_t av_get_channel_layout(const char *name);
 
@@ -91,5 +119,14 @@ void av_get_channel_layout_string(char *buf, int buf_size, int nb_channels, int6
  * Return the number of channels in the channel layout.
  */
 int av_get_channel_layout_nb_channels(int64_t channel_layout);
+
+/**
+ * Return default channel layout for a given number of channels.
+ */
+int64_t av_get_default_channel_layout(int nb_channels);
+
+/**
+ * @}
+ */
 
 #endif /* AVUTIL_AUDIOCONVERT_H */

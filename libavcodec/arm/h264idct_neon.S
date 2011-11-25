@@ -21,7 +21,6 @@
 #include "asm.S"
 
         preserve8
-        .text
 
 function ff_h264_idct_add_neon, export=1
         vld1.64         {d0-d3},  [r1,:128]
@@ -383,8 +382,8 @@ function ff_h264_idct8_add4_neon, export=1
         pop             {r4-r8,pc}
 endfunc
 
-        .section .rodata
-scan8:  .byte           4+ 1*8, 5+ 1*8, 4+ 2*8, 5+ 2*8
+const   scan8
+        .byte           4+ 1*8, 5+ 1*8, 4+ 2*8, 5+ 2*8
         .byte           6+ 1*8, 7+ 1*8, 6+ 2*8, 7+ 2*8
         .byte           4+ 3*8, 5+ 3*8, 4+ 4*8, 5+ 4*8
         .byte           6+ 3*8, 7+ 3*8, 6+ 4*8, 7+ 4*8
@@ -396,3 +395,4 @@ scan8:  .byte           4+ 1*8, 5+ 1*8, 4+ 2*8, 5+ 2*8
         .byte           6+11*8, 7+11*8, 6+12*8, 7+12*8
         .byte           4+13*8, 5+13*8, 4+14*8, 5+14*8
         .byte           6+13*8, 7+13*8, 6+14*8, 7+14*8
+endconst

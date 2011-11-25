@@ -39,7 +39,7 @@ static const uint8_t IP_shuffle[] = {
 };
 #undef T
 
-#if defined(CONFIG_SMALL) || defined(GENTABLES)
+#if CONFIG_SMALL || defined(GENTABLES)
 #define T(a, b, c, d) 32-a,32-b,32-c,32-d
 static const uint8_t P_shuffle[] = {
     T(16,  7, 20, 21),
@@ -298,11 +298,11 @@ int av_des_init(AVDES *d, const uint8_t *key, int key_bits, int decrypt) {
     return 0;
 }
 
-void av_des_crypt(AVDES *d, uint8_t *dst, const uint8_t *src, int count, uint8_t *iv, int decrypt) {
-    uint64_t iv_val = iv ? av_be2ne64(*(uint64_t *)iv) : 0;
+static void av_des_crypt_mac(AVDES *d, uint8_t *dst, const uint8_t *src, int count, uint8_t *iv, int decrypt, int mac) {
+    uint64_t iv_val = iv ? AV_RB64(iv) : 0;
     while (count-- > 0) {
         uint64_t dst_val;
-        uint64_t src_val = src ? av_be2ne64(*(const uint64_t *)src) : 0;
+        uint64_t src_val = src ? AV_RB64(src) : 0;
         if (decrypt) {
             uint64_t tmp = src_val;
             if (d->triple_des) {
@@ -319,12 +319,21 @@ void av_des_crypt(AVDES *d, uint8_t *dst, const uint8_t *src, int count, uint8_t
             }
             iv_val = iv ? dst_val : 0;
         }
-        *(uint64_t *)dst = av_be2ne64(dst_val);
+        AV_WB64(dst, dst_val);
         src += 8;
-        dst += 8;
+        if (!mac)
+            dst += 8;
     }
     if (iv)
-        *(uint64_t *)iv = av_be2ne64(iv_val);
+        AV_WB64(iv, iv_val);
+}
+
+void av_des_crypt(AVDES *d, uint8_t *dst, const uint8_t *src, int count, uint8_t *iv, int decrypt) {
+    av_des_crypt_mac(d, dst, src, count, iv, decrypt, 0);
+}
+
+void av_des_mac(AVDES *d, uint8_t *dst, const uint8_t *src, int count) {
+    av_des_crypt_mac(d, dst, src, count, (uint8_t[8]){0}, 0, 1);
 }
 
 #ifdef TEST

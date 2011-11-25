@@ -302,7 +302,7 @@ static av_cold int decode_init(AVCodecContext *avctx)
 
     if ((err = extract_header(avctx, NULL)) < 0)
         return err;
-    s->frame.reference = 1;
+    s->frame.reference = 3;
 
     return 0;
 }
@@ -440,7 +440,18 @@ static int decode_frame_ilbm(AVCodecContext *avctx,
     }
     s->init = 1;
 
-    if (avctx->codec_tag == MKTAG('I','L','B','M')) { // interleaved
+    if (avctx->codec_tag == MKTAG('A','C','B','M')) {
+        if (avctx->pix_fmt == PIX_FMT_PAL8 || avctx->pix_fmt == PIX_FMT_GRAY8) {
+            memset(s->frame.data[0], 0, avctx->height * s->frame.linesize[0]);
+            for (plane = 0; plane < s->bpp; plane++) {
+                for(y = 0; y < avctx->height && buf < buf_end; y++ ) {
+                    uint8_t *row = &s->frame.data[0][ y*s->frame.linesize[0] ];
+                    decodeplane8(row, buf, FFMIN(s->planesize, buf_end - buf), plane);
+                    buf += s->planesize;
+                }
+            }
+        }
+    } else if (avctx->codec_tag == MKTAG('I','L','B','M')) { // interleaved
         if (avctx->pix_fmt == PIX_FMT_PAL8 || avctx->pix_fmt == PIX_FMT_GRAY8) {
             for(y = 0; y < avctx->height; y++ ) {
                 uint8_t *row = &s->frame.data[0][ y*s->frame.linesize[0] ];
@@ -576,27 +587,25 @@ static av_cold int decode_end(AVCodecContext *avctx)
 }
 
 AVCodec ff_iff_ilbm_decoder = {
-    "iff_ilbm",
-    AVMEDIA_TYPE_VIDEO,
-    CODEC_ID_IFF_ILBM,
-    sizeof(IffContext),
-    decode_init,
-    NULL,
-    decode_end,
-    decode_frame_ilbm,
-    CODEC_CAP_DR1,
+    .name           = "iff_ilbm",
+    .type           = AVMEDIA_TYPE_VIDEO,
+    .id             = CODEC_ID_IFF_ILBM,
+    .priv_data_size = sizeof(IffContext),
+    .init           = decode_init,
+    .close          = decode_end,
+    .decode         = decode_frame_ilbm,
+    .capabilities   = CODEC_CAP_DR1,
     .long_name = NULL_IF_CONFIG_SMALL("IFF ILBM"),
 };
 
 AVCodec ff_iff_byterun1_decoder = {
-    "iff_byterun1",
-    AVMEDIA_TYPE_VIDEO,
-    CODEC_ID_IFF_BYTERUN1,
-    sizeof(IffContext),
-    decode_init,
-    NULL,
-    decode_end,
-    decode_frame_byterun1,
-    CODEC_CAP_DR1,
+    .name           = "iff_byterun1",
+    .type           = AVMEDIA_TYPE_VIDEO,
+    .id             = CODEC_ID_IFF_BYTERUN1,
+    .priv_data_size = sizeof(IffContext),
+    .init           = decode_init,
+    .close          = decode_end,
+    .decode         = decode_frame_byterun1,
+    .capabilities   = CODEC_CAP_DR1,
     .long_name = NULL_IF_CONFIG_SMALL("IFF ByteRun1"),
 };

@@ -52,6 +52,7 @@
 #define MAC_COEF(d,a,b) ((d)+=(a)*(b))
 #define COEF_MIN (-16777215.0/16777216.0)
 #define COEF_MAX ( 16777215.0/16777216.0)
+#define NEW_CPL_COORD_THRESHOLD 0.03
 typedef float SampleType;
 typedef float CoefType;
 typedef float CoefSumType;
@@ -60,17 +61,30 @@ typedef float CoefSumType;
 #define MAC_COEF(d,a,b) MAC64(d,a,b)
 #define COEF_MIN -16777215
 #define COEF_MAX  16777215
+#define NEW_CPL_COORD_THRESHOLD 503317
 typedef int16_t SampleType;
 typedef int32_t CoefType;
 typedef int64_t CoefSumType;
 #endif
 
+/* common option values */
+#define AC3ENC_OPT_NONE            -1
+#define AC3ENC_OPT_AUTO            -1
+#define AC3ENC_OPT_OFF              0
+#define AC3ENC_OPT_ON               1
+#define AC3ENC_OPT_NOT_INDICATED    0
+#define AC3ENC_OPT_MODE_ON          2
+#define AC3ENC_OPT_MODE_OFF         1
 
-typedef struct AC3MDCTContext {
-    const SampleType *window;           ///< MDCT window function
-    FFTContext fft;                     ///< FFT context for MDCT calculation
-} AC3MDCTContext;
-#if 0
+/* specific option values */
+#define AC3ENC_OPT_LARGE_ROOM       1
+#define AC3ENC_OPT_SMALL_ROOM       2
+#define AC3ENC_OPT_DOWNMIX_LTRT     1
+#define AC3ENC_OPT_DOWNMIX_LORO     2
+#define AC3ENC_OPT_ADCONV_STANDARD  0
+#define AC3ENC_OPT_ADCONV_HDCD      1
+
+
 /**
  * Encoding Options used by AVOption.
  */
@@ -96,6 +110,8 @@ typedef struct AC3EncOptions {
     int dolby_surround_ex_mode;
     int dolby_headphone_mode;
     int ad_converter_type;
+    int eac3_mixing_metadata;
+    int eac3_info_metadata;
 
     /* other encoding options */
     int allow_per_frame_metadata;
@@ -103,7 +119,7 @@ typedef struct AC3EncOptions {
     int channel_coupling;
     int cpl_start;
 } AC3EncOptions;
-#endif
+
 /**
  * Data for a single audio block.
  */
@@ -126,7 +142,7 @@ typedef struct AC3Block {
     int      cpl_in_use;                        ///< coupling in use for this block     (cplinu)
     uint8_t  channel_in_cpl[AC3_MAX_CHANNELS];  ///< channel in coupling                (chincpl)
     int      num_cpl_channels;                  ///< number of channels in coupling
-    uint8_t  new_cpl_coords;                    ///< send new coupling coordinates      (cplcoe)
+    uint8_t  new_cpl_coords[AC3_MAX_CHANNELS];  ///< send new coupling coordinates      (cplcoe)
     uint8_t  cpl_master_exp[AC3_MAX_CHANNELS];  ///< coupling coord master exponents    (mstrcplco)
     int      new_snr_offsets;                   ///< send new SNR offsets
     int      new_cpl_leak;                      ///< send new coupling leak info
@@ -143,7 +159,8 @@ typedef struct AC3EncodeContext {
     PutBitContext pb;                       ///< bitstream writer context
     DSPContext dsp;
     AC3DSPContext ac3dsp;                   ///< AC-3 optimized functions
-    AC3MDCTContext *mdct;                   ///< MDCT context
+    FFTContext mdct;                        ///< FFT context for MDCT calculation
+    const SampleType *mdct_window;          ///< MDCT window function array
 
     AC3Block blocks[AC3_MAX_BLOCKS];        ///< per-block info
 
@@ -155,6 +172,8 @@ typedef struct AC3EncodeContext {
     int bit_rate;                           ///< target bit rate, in bits-per-second
     int sample_rate;                        ///< sampling frequency, in Hz
 
+    int num_blks_code;                      ///< number of blocks code                  (numblkscod)
+    int num_blocks;                         ///< number of blocks per frame
     int frame_size_min;                     ///< minimum frame size in case rounding is necessary
     int frame_size;                         ///< current frame size in bytes
     int frame_size_code;                    ///< frame size code                        (frmsizecod)
@@ -221,13 +240,15 @@ typedef struct AC3EncodeContext {
     uint8_t *cpl_coord_mant_buffer;
 
     uint8_t exp_strategy[AC3_MAX_CHANNELS][AC3_MAX_BLOCKS]; ///< exponent strategies
+    uint8_t frame_exp_strategy[AC3_MAX_CHANNELS];           ///< frame exp strategy index
+    int use_frame_exp_strategy;                             ///< indicates use of frame exp strategy
     uint8_t exp_ref_block[AC3_MAX_CHANNELS][AC3_MAX_BLOCKS]; ///< reference blocks for EXP_REUSE
     uint8_t *ref_bap     [AC3_MAX_CHANNELS][AC3_MAX_BLOCKS]; ///< bit allocation pointers (bap)
     int ref_bap_set;                                         ///< indicates if ref_bap pointers have been set
 
     /* fixed vs. float function pointers */
-    void (*mdct_end)(AC3MDCTContext *mdct);
-    int  (*mdct_init)(AVCodecContext *avctx, AC3MDCTContext *mdct, int nbits);
+    void (*mdct_end)(struct AC3EncodeContext *s);
+    int  (*mdct_init)(struct AC3EncodeContext *s);
 
     /* fixed vs. float templated function pointers */
     int  (*allocate_sample_buffers)(struct AC3EncodeContext *s);
@@ -237,11 +258,13 @@ typedef struct AC3EncodeContext {
 } AC3EncodeContext;
 
 
+extern const int64_t ff_ac3_channel_layouts[19];
+
 int ff_ac3_encode_init(AVCodecContext *avctx);
 
 int ff_ac3_encode_close(AVCodecContext *avctx);
 
-int ff_ac3_validate_metadata(AVCodecContext *avctx);
+int ff_ac3_validate_metadata(AC3EncodeContext *s);
 
 void ff_ac3_adjust_frame_size(AC3EncodeContext *s);
 
@@ -253,6 +276,8 @@ void ff_ac3_process_exponents(AC3EncodeContext *s);
 
 int ff_ac3_compute_bit_allocation(AC3EncodeContext *s);
 
+void ff_ac3_group_exponents(AC3EncodeContext *s);
+
 void ff_ac3_quantize_mantissas(AC3EncodeContext *s);
 
 void ff_ac3_output_frame(AC3EncodeContext *s, unsigned char *frame);
@@ -260,13 +285,11 @@ void ff_ac3_output_frame(AC3EncodeContext *s, unsigned char *frame);
 
 /* prototypes for functions in ac3enc_fixed.c and ac3enc_float.c */
 
-void ff_ac3_fixed_mdct_end(AC3MDCTContext *mdct);
-void ff_ac3_float_mdct_end(AC3MDCTContext *mdct);
+void ff_ac3_fixed_mdct_end(AC3EncodeContext *s);
+void ff_ac3_float_mdct_end(AC3EncodeContext *s);
 
-int ff_ac3_fixed_mdct_init(AVCodecContext *avctx, AC3MDCTContext *mdct,
-                           int nbits);
-int ff_ac3_float_mdct_init(AVCodecContext *avctx, AC3MDCTContext *mdct,
-                           int nbits);
+int ff_ac3_fixed_mdct_init(AC3EncodeContext *s);
+int ff_ac3_float_mdct_init(AC3EncodeContext *s);
 
 
 /* prototypes for functions in ac3enc_template.c */

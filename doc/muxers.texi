@@ -51,7 +51,7 @@ and the input video converted to MPEG-2 video, use the command:
 ffmpeg -i INPUT -acodec pcm_u8 -vcodec mpeg2video -f crc -
 @end example
 
-See also the @code{framecrc} muxer (@pxref{framecrc}).
+See also the @ref{framecrc} muxer.
 
 @anchor{framecrc}
 @section framecrc
@@ -88,7 +88,7 @@ MPEG-2 video, use the command:
 ffmpeg -i INPUT -acodec pcm_u8 -vcodec mpeg2video -f framecrc -
 @end example
 
-See also the @code{crc} muxer (@pxref{crc}).
+See also the @ref{crc} muxer.
 
 @section image2
 
@@ -146,6 +146,18 @@ special in that that each image frame consists of three files, for
 each of the YUV420P components. To read or write this image file format,
 specify the name of the '.Y' file. The muxer will automatically open the
 '.U' and '.V' files as required.
+
+@section mov
+
+MOV / MP4 muxer
+
+The muxer options are:
+
+@table @option
+@item -moov_size @var{bytes}
+Reserves space for the moov atom at the beginning of the file instead of placing the
+moov atom at the end. If the space reserved is insufficient, muxing will fail.
+@end table
 
 @section mpegts
 

@@ -139,7 +139,7 @@ static int rpl_read_header(AVFormatContext *s, AVFormatParameters *ap)
     av_dict_set(&s->metadata, "author"   , line, 0);
 
     // video headers
-    vst = av_new_stream(s, 0);
+    vst = avformat_new_stream(s, NULL);
     if (!vst)
         return AVERROR(ENOMEM);
     vst->codec->codec_type      = AVMEDIA_TYPE_VIDEO;
@@ -181,7 +181,7 @@ static int rpl_read_header(AVFormatContext *s, AVFormatParameters *ap)
     // samples, though. This code will ignore additional tracks.
     audio_format = read_line_and_int(pb, &error);  // audio format ID
     if (audio_format) {
-        ast = av_new_stream(s, 0);
+        ast = avformat_new_stream(s, NULL);
         if (!ast)
             return AVERROR(ENOMEM);
         ast->codec->codec_type      = AVMEDIA_TYPE_AUDIO;
@@ -351,10 +351,10 @@ static int rpl_read_packet(AVFormatContext *s, AVPacket *pkt)
 }
 
 AVInputFormat ff_rpl_demuxer = {
-    "rpl",
-    NULL_IF_CONFIG_SMALL("RPL/ARMovie format"),
-    sizeof(RPLContext),
-    rpl_probe,
-    rpl_read_header,
-    rpl_read_packet,
+    .name           = "rpl",
+    .long_name      = NULL_IF_CONFIG_SMALL("RPL/ARMovie format"),
+    .priv_data_size = sizeof(RPLContext),
+    .read_probe     = rpl_probe,
+    .read_header    = rpl_read_header,
+    .read_packet    = rpl_read_packet,
 };

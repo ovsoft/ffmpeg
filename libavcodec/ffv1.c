@@ -1733,7 +1733,7 @@ static int decode_frame(AVCodecContext *avctx, void *data, int *data_size, AVPac
         bytes_read = c->bytestream - c->bytestream_start - 1;
         if(bytes_read ==0) av_log(avctx, AV_LOG_ERROR, "error at end of AC stream\n"); //FIXME
 //printf("pos=%d\n", bytes_read);
-        init_get_bits(&f->slice_context[0]->gb, buf + bytes_read, buf_size - bytes_read);
+        init_get_bits(&f->slice_context[0]->gb, buf + bytes_read, (buf_size - bytes_read) * 8);
     } else {
         bytes_read = 0; /* avoid warning */
     }
@@ -1750,7 +1750,7 @@ static int decode_frame(AVCodecContext *avctx, void *data, int *data_size, AVPac
         if(fs->ac){
             ff_init_range_decoder(&fs->c, buf_p, v);
         }else{
-            init_get_bits(&fs->gb, buf_p, v);
+            init_get_bits(&fs->gb, buf_p, v * 8);
         }
     }
 
@@ -1764,28 +1764,26 @@ static int decode_frame(AVCodecContext *avctx, void *data, int *data_size, AVPac
 }
 
 AVCodec ff_ffv1_decoder = {
-    "ffv1",
-    AVMEDIA_TYPE_VIDEO,
-    CODEC_ID_FFV1,
-    sizeof(FFV1Context),
-    decode_init,
-    NULL,
-    common_end,
-    decode_frame,
-    CODEC_CAP_DR1 /*| CODEC_CAP_DRAW_HORIZ_BAND*/ | CODEC_CAP_SLICE_THREADS,
-    NULL,
+    .name           = "ffv1",
+    .type           = AVMEDIA_TYPE_VIDEO,
+    .id             = CODEC_ID_FFV1,
+    .priv_data_size = sizeof(FFV1Context),
+    .init           = decode_init,
+    .close          = common_end,
+    .decode         = decode_frame,
+    .capabilities   = CODEC_CAP_DR1 /*| CODEC_CAP_DRAW_HORIZ_BAND*/ | CODEC_CAP_SLICE_THREADS,
     .long_name= NULL_IF_CONFIG_SMALL("FFmpeg video codec #1"),
 };
 
 #if CONFIG_FFV1_ENCODER
 AVCodec ff_ffv1_encoder = {
-    "ffv1",
-    AVMEDIA_TYPE_VIDEO,
-    CODEC_ID_FFV1,
-    sizeof(FFV1Context),
-    encode_init,
-    encode_frame,
-    common_end,
+    .name           = "ffv1",
+    .type           = AVMEDIA_TYPE_VIDEO,
+    .id             = CODEC_ID_FFV1,
+    .priv_data_size = sizeof(FFV1Context),
+    .init           = encode_init,
+    .encode         = encode_frame,
+    .close          = common_end,
     .capabilities = CODEC_CAP_SLICE_THREADS,
     .pix_fmts= (const enum PixelFormat[]){PIX_FMT_YUV420P, PIX_FMT_YUV444P, PIX_FMT_YUV422P, PIX_FMT_YUV411P, PIX_FMT_YUV410P, PIX_FMT_RGB32, PIX_FMT_YUV420P16, PIX_FMT_YUV422P16, PIX_FMT_YUV444P16, PIX_FMT_YUV420P9, PIX_FMT_YUV420P10, PIX_FMT_YUV422P10, PIX_FMT_NONE},
     .long_name= NULL_IF_CONFIG_SMALL("FFmpeg video codec #1"),

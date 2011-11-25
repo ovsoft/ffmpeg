@@ -767,7 +767,7 @@ static int decode_frame(AVCodecContext *avctx,
         av_log(avctx, AV_LOG_ERROR, "Cannot allocate temporary buffer\n");
         return -1;
     }
-    p->reference = 1;
+    p->reference = 3;
     p->buffer_hints = FF_BUFFER_HINTS_VALID | FF_BUFFER_HINTS_PRESERVE | FF_BUFFER_HINTS_REUSABLE;
     if(avctx->reget_buffer(avctx, p) < 0){
         av_log(avctx, AV_LOG_ERROR, "get_buffer() failed\n");
@@ -865,14 +865,13 @@ static av_cold int decode_end(AVCodecContext *avctx){
 }
 
 AVCodec ff_truemotion2_decoder = {
-    "truemotion2",
-    AVMEDIA_TYPE_VIDEO,
-    CODEC_ID_TRUEMOTION2,
-    sizeof(TM2Context),
-    decode_init,
-    NULL,
-    decode_end,
-    decode_frame,
-    CODEC_CAP_DR1,
+    .name           = "truemotion2",
+    .type           = AVMEDIA_TYPE_VIDEO,
+    .id             = CODEC_ID_TRUEMOTION2,
+    .priv_data_size = sizeof(TM2Context),
+    .init           = decode_init,
+    .close          = decode_end,
+    .decode         = decode_frame,
+    .capabilities   = CODEC_CAP_DR1,
     .long_name = NULL_IF_CONFIG_SMALL("Duck TrueMotion 2.0"),
 };

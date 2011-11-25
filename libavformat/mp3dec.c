@@ -51,7 +51,7 @@ static int mp3_read_probe(AVProbeData *p)
 
         for(frames = 0; buf2 < end; frames++) {
             header = AV_RB32(buf2);
-            fsize = ff_mpa_decode_header(&avctx, header, &sample_rate, &sample_rate, &sample_rate, &sample_rate);
+            fsize = avpriv_mpa_decode_header(&avctx, header, &sample_rate, &sample_rate, &sample_rate, &sample_rate);
             if(fsize < 0)
                 break;
             buf2 += fsize;
@@ -86,7 +86,7 @@ static int mp3_parse_vbr_tags(AVFormatContext *s, AVStream *st, int64_t base)
     if(ff_mpa_check_header(v) < 0)
       return -1;
 
-    if (ff_mpegaudio_decode_header(&c, v) == 0)
+    if (avpriv_mpegaudio_decode_header(&c, v) == 0)
         vbrtag_size = c.frame_size;
     if(c.layer != 3)
         return -1;
@@ -110,8 +110,8 @@ static int mp3_parse_vbr_tags(AVFormatContext *s, AVStream *st, int64_t base)
         if(avio_rb16(s->pb) == 1) {
             /* skip delay and quality */
             avio_skip(s->pb, 4);
-            frames = avio_rb32(s->pb);
             size = avio_rb32(s->pb);
+            frames = avio_rb32(s->pb);
         }
     }
 
@@ -137,7 +137,7 @@ static int mp3_read_header(AVFormatContext *s,
     AVStream *st;
     int64_t off;
 
-    st = av_new_stream(s, 0);
+    st = avformat_new_stream(s, NULL);
     if (!st)
         return AVERROR(ENOMEM);
 
@@ -174,7 +174,9 @@ static int mp3_read_packet(AVFormatContext *s, AVPacket *pkt)
 
     pkt->stream_index = 0;
     if (ret <= 0) {
-        return AVERROR(EIO);
+        if(ret<0)
+            return ret;
+        return AVERROR_EOF;
     }
 
     if (ret > ID3v1_TAG_SIZE &&
@@ -188,12 +190,11 @@ static int mp3_read_packet(AVFormatContext *s, AVPacket *pkt)
 }
 
 AVInputFormat ff_mp3_demuxer = {
-    "mp3",
-    NULL_IF_CONFIG_SMALL("MPEG audio layer 2/3"),
-    0,
-    mp3_read_probe,
-    mp3_read_header,
-    mp3_read_packet,
+    .name           = "mp3",
+    .long_name      = NULL_IF_CONFIG_SMALL("MPEG audio layer 2/3"),
+    .read_probe     = mp3_read_probe,
+    .read_header    = mp3_read_header,
+    .read_packet    = mp3_read_packet,
     .flags= AVFMT_GENERIC_INDEX,
     .extensions = "mp2,mp3,m2a", /* XXX: use probe */
 };

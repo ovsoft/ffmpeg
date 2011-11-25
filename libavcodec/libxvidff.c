@@ -28,12 +28,11 @@
 #include <xvid.h>
 #include <unistd.h>
 #include "avcodec.h"
+#include "libavutil/file.h"
 #include "libavutil/cpu.h"
 #include "libavutil/intreadwrite.h"
+#include "libavutil/mathematics.h"
 #include "libxvid_internal.h"
-#if !HAVE_MKSTEMP
-#include <fcntl.h>
-#endif
 
 /**
  * Buffer management macros.
@@ -75,42 +74,6 @@ struct xvid_ff_pass1 {
 int xvid_strip_vol_header(AVCodecContext *avctx, unsigned char *frame, unsigned int header_len, unsigned int frame_len);
 int xvid_ff_2pass(void *ref, int opt, void *p1, void *p2);
 void xvid_correct_framerate(AVCodecContext *avctx);
-
-/* Wrapper to work around the lack of mkstemp() on mingw.
- * Also, tries to create file in /tmp first, if possible.
- * *prefix can be a character constant; *filename will be allocated internally.
- * @return file descriptor of opened file (or -1 on error)
- * and opened file name in **filename. */
-int ff_tempfile(const char *prefix, char **filename) {
-    int fd=-1;
-#if !HAVE_MKSTEMP
-    *filename = tempnam(".", prefix);
-#else
-    size_t len = strlen(prefix) + 12; /* room for "/tmp/" and "XXXXXX\0" */
-    *filename = av_malloc(len);
-#endif
-    /* -----common section-----*/
-    if (*filename == NULL) {
-        av_log(NULL, AV_LOG_ERROR, "ff_tempfile: Cannot allocate file name\n");
-        return -1;
-    }
-#if !HAVE_MKSTEMP
-    fd = open(*filename, O_RDWR | O_BINARY | O_CREAT, 0444);
-#else
-    snprintf(*filename, len, "/tmp/%sXXXXXX", prefix);
-    fd = mkstemp(*filename);
-    if (fd < 0) {
-        snprintf(*filename, len, "./%sXXXXXX", prefix);
-        fd = mkstemp(*filename);
-    }
-#endif
-    /* -----common section-----*/
-    if (fd < 0) {
-        av_log(NULL, AV_LOG_ERROR, "ff_tempfile: Cannot open temporary file %s\n", *filename);
-        return -1;
-    }
-    return fd; /* success */
-}
 
 #if CONFIG_LIBXVID_ENCODER
 
@@ -269,7 +232,7 @@ static av_cold int xvid_encode_init(AVCodecContext *avctx)  {
         rc2pass2.version = XVID_VERSION;
         rc2pass2.bitrate = avctx->bit_rate;
 
-        fd = ff_tempfile("xvidff.", &(x->twopassfile));
+        fd = av_tempfile("xvidff.", &(x->twopassfile), 0, avctx);
         if( fd == -1 ) {
             av_log(avctx, AV_LOG_ERROR,
                 "Xvid: Cannot write 2-pass pipe\n");
@@ -749,7 +712,7 @@ static int xvid_ff_2pass_before(struct xvid_context *ref,
 static int xvid_ff_2pass_after(struct xvid_context *ref,
                                 xvid_plg_data_t *param) {
     char *log = ref->twopassbuffer;
-    char *frame_types = " ipbs";
+    const char *frame_types = " ipbs";
     char frame_type;
 
     /* Quick bounds check */
@@ -809,13 +772,13 @@ int xvid_ff_2pass(void *ref, int cmd, void *p1, void *p2) {
  * Xvid codec definition for libavcodec.
  */
 AVCodec ff_libxvid_encoder = {
-    "libxvid",
-    AVMEDIA_TYPE_VIDEO,
-    CODEC_ID_MPEG4,
-    sizeof(struct xvid_context),
-    xvid_encode_init,
-    xvid_encode_frame,
-    xvid_encode_close,
+    .name           = "libxvid",
+    .type           = AVMEDIA_TYPE_VIDEO,
+    .id             = CODEC_ID_MPEG4,
+    .priv_data_size = sizeof(struct xvid_context),
+    .init           = xvid_encode_init,
+    .encode         = xvid_encode_frame,
+    .close          = xvid_encode_close,
     .pix_fmts= (const enum PixelFormat[]){PIX_FMT_YUV420P, PIX_FMT_NONE},
     .long_name= NULL_IF_CONFIG_SMALL("libxvidcore MPEG-4 part 2"),
 };

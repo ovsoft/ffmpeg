@@ -43,6 +43,7 @@
 #define ID_BMHD       MKTAG('B','M','H','D')
 #define ID_CAMG       MKTAG('C','A','M','G')
 #define ID_CMAP       MKTAG('C','M','A','P')
+#define ID_ACBM       MKTAG('A','C','B','M')
 
 #define ID_FORM       MKTAG('F','O','R','M')
 #define ID_ANNO       MKTAG('A','N','N','O')
@@ -53,6 +54,7 @@
 #define ID_FVER       MKTAG('F','V','E','R')
 #define ID_NAME       MKTAG('N','A','M','E')
 #define ID_TEXT       MKTAG('T','E','X','T')
+#define ID_ABIT       MKTAG('A','B','I','T')
 #define ID_BODY       MKTAG('B','O','D','Y')
 #define ID_ANNO       MKTAG('A','N','N','O')
 
@@ -85,7 +87,6 @@ typedef struct {
     uint64_t  body_pos;
     uint32_t  body_size;
     uint32_t  sent_bytes;
-    uint32_t  audio_frame_count;
     svx8_compression_type   svx8_compression;
     bitmap_compression_type bitmap_compression;  ///< delta compression method used
     unsigned  bpp;          ///< bits per plane to decode (differs from bits_per_coded_sample if HAM)
@@ -119,7 +120,7 @@ static int iff_probe(AVProbeData *p)
     const uint8_t *d = p->buf;
 
     if ( AV_RL32(d)   == ID_FORM &&
-         (AV_RL32(d+8) == ID_8SVX || AV_RL32(d+8) == ID_PBM || AV_RL32(d+8) == ID_ILBM) )
+         (AV_RL32(d+8) == ID_8SVX || AV_RL32(d+8) == ID_PBM || AV_RL32(d+8) == ID_ILBM || AV_RL32(d+8) == ID_ACBM) )
         return AVPROBE_SCORE_MAX;
     return 0;
 }
@@ -136,7 +137,7 @@ static int iff_read_header(AVFormatContext *s,
     unsigned transparency = 0;
     unsigned masking = 0; // no mask
 
-    st = av_new_stream(s, 0);
+    st = avformat_new_stream(s, NULL);
     if (!st)
         return AVERROR(ENOMEM);
 
@@ -167,6 +168,7 @@ static int iff_read_header(AVFormatContext *s,
             }
             break;
 
+        case ID_ABIT:
         case ID_BODY:
             iff->body_pos = avio_tell(pb);
             iff->body_size = data_size;
@@ -240,7 +242,7 @@ static int iff_read_header(AVFormatContext *s,
 
         switch (iff->svx8_compression) {
         case COMP_NONE:
-            st->codec->codec_id = CODEC_ID_8SVX_RAW;
+            st->codec->codec_id = CODEC_ID_PCM_S8_PLANAR;
             break;
         case COMP_FIB:
             st->codec->codec_id = CODEC_ID_8SVX_FIB;
@@ -313,7 +315,7 @@ static int iff_read_packet(AVFormatContext *s,
     int ret;
 
     if(iff->sent_bytes >= iff->body_size)
-        return AVERROR(EIO);
+        return AVERROR_EOF;
 
     if (st->codec->codec_type == AVMEDIA_TYPE_AUDIO) {
         ret = av_get_packet(pb, pkt, iff->body_size);
@@ -340,10 +342,10 @@ static int iff_read_packet(AVFormatContext *s,
 }
 
 AVInputFormat ff_iff_demuxer = {
-    "IFF",
-    NULL_IF_CONFIG_SMALL("IFF format"),
-    sizeof(IffDemuxContext),
-    iff_probe,
-    iff_read_header,
-    iff_read_packet,
+    .name           = "IFF",
+    .long_name      = NULL_IF_CONFIG_SMALL("IFF format"),
+    .priv_data_size = sizeof(IffDemuxContext),
+    .read_probe     = iff_probe,
+    .read_header    = iff_read_header,
+    .read_packet    = iff_read_packet,
 };

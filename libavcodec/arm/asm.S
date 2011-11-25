@@ -34,6 +34,22 @@
 #   define T @
 #endif
 
+#if   HAVE_NEON
+        .arch           armv7-a
+#elif HAVE_ARMV6T2
+        .arch           armv6t2
+#elif HAVE_ARMV6
+        .arch           armv6
+#elif HAVE_ARMV5TE
+        .arch           armv5te
+#endif
+
+#if   HAVE_NEON
+        .fpu            neon
+#elif HAVE_ARMVFP
+        .fpu            vfp
+#endif
+
         .syntax unified
 T       .thumb
 
@@ -97,6 +113,12 @@ T       add             \rn, \rn, \rm
 T       ldr             \rt, [\rn]
 .endm
 
+.macro  ldr_dpren       rt,  rn,  rm:vararg
+A       ldr             \rt, [\rn, -\rm]
+T       sub             \rt, \rn, \rm
+T       ldr             \rt, [\rt]
+.endm
+
 .macro  ldr_post        rt,  rn,  rm:vararg
 A       ldr             \rt, [\rn], \rm
 T       ldr             \rt, [\rn]
@@ -130,6 +152,12 @@ T       ldrh            \rt, [\rn]
 .macro  ldrh_post       rt,  rn,  rm
 A       ldrh            \rt, [\rn], \rm
 T       ldrh            \rt, [\rn]
+T       add             \rn, \rn, \rm
+.endm
+
+.macro  ldrb_post       rt,  rn,  rm
+A       ldrb            \rt, [\rn], \rm
+T       ldrb            \rt, [\rn]
 T       add             \rn, \rn, \rm
 .endm
 

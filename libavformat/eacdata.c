@@ -66,7 +66,7 @@ static int cdata_read_header(AVFormatContext *s, AVFormatParameters *ap)
     sample_rate = avio_rb16(pb);
     avio_skip(pb, (avio_r8(pb) & 0x20) ? 15 : 11);
 
-    st = av_new_stream(s, 0);
+    st = avformat_new_stream(s, NULL);
     if (!st)
         return AVERROR(ENOMEM);
     st->codec->codec_type = AVMEDIA_TYPE_AUDIO;
@@ -95,11 +95,11 @@ static int cdata_read_packet(AVFormatContext *s, AVPacket *pkt)
 }
 
 AVInputFormat ff_ea_cdata_demuxer = {
-    "ea_cdata",
-    NULL_IF_CONFIG_SMALL("Electronic Arts cdata"),
-    sizeof(CdataDemuxContext),
-    cdata_probe,
-    cdata_read_header,
-    cdata_read_packet,
+    .name           = "ea_cdata",
+    .long_name      = NULL_IF_CONFIG_SMALL("Electronic Arts cdata"),
+    .priv_data_size = sizeof(CdataDemuxContext),
+    .read_probe     = cdata_probe,
+    .read_header    = cdata_read_header,
+    .read_packet    = cdata_read_packet,
     .extensions = "cdata",
 };

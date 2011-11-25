@@ -293,7 +293,7 @@ static int decode_frame(AVCodecContext *avctx, void *data, int *data_size, AVPac
     const uint8_t *src = buf;
     int dx, dy, w, h, depth, enc, chunks, res, size_left;
 
-    c->pic.reference = 1;
+    c->pic.reference = 3;
     c->pic.buffer_hints = FF_BUFFER_HINTS_VALID | FF_BUFFER_HINTS_PRESERVE | FF_BUFFER_HINTS_REUSABLE;
     if(avctx->reget_buffer(avctx, &c->pic) < 0){
         av_log(avctx, AV_LOG_ERROR, "reget_buffer() failed\n");
@@ -510,15 +510,14 @@ static av_cold int decode_end(AVCodecContext *avctx)
 }
 
 AVCodec ff_vmnc_decoder = {
-    "vmnc",
-    AVMEDIA_TYPE_VIDEO,
-    CODEC_ID_VMNC,
-    sizeof(VmncContext),
-    decode_init,
-    NULL,
-    decode_end,
-    decode_frame,
-    CODEC_CAP_DR1,
+    .name           = "vmnc",
+    .type           = AVMEDIA_TYPE_VIDEO,
+    .id             = CODEC_ID_VMNC,
+    .priv_data_size = sizeof(VmncContext),
+    .init           = decode_init,
+    .close          = decode_end,
+    .decode         = decode_frame,
+    .capabilities   = CODEC_CAP_DR1,
     .long_name = NULL_IF_CONFIG_SMALL("VMware Screen Codec / VMware Video"),
 };
 

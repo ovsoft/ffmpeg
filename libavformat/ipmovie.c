@@ -559,7 +559,7 @@ static int ipmovie_read_header(AVFormatContext *s,
         return AVERROR_INVALIDDATA;
 
     /* initialize the stream decoders */
-    st = av_new_stream(s, 0);
+    st = avformat_new_stream(s, NULL);
     if (!st)
         return AVERROR(ENOMEM);
     av_set_pts_info(st, 63, 1, 1000000);
@@ -572,7 +572,7 @@ static int ipmovie_read_header(AVFormatContext *s,
     st->codec->bits_per_coded_sample = ipmovie->video_bpp;
 
     if (ipmovie->audio_type) {
-        st = av_new_stream(s, 0);
+        st = avformat_new_stream(s, NULL);
         if (!st)
             return AVERROR(ENOMEM);
         av_set_pts_info(st, 32, 1, ipmovie->audio_sample_rate);
@@ -616,10 +616,10 @@ static int ipmovie_read_packet(AVFormatContext *s,
 }
 
 AVInputFormat ff_ipmovie_demuxer = {
-    "ipmovie",
-    NULL_IF_CONFIG_SMALL("Interplay MVE format"),
-    sizeof(IPMVEContext),
-    ipmovie_probe,
-    ipmovie_read_header,
-    ipmovie_read_packet,
+    .name           = "ipmovie",
+    .long_name      = NULL_IF_CONFIG_SMALL("Interplay MVE format"),
+    .priv_data_size = sizeof(IPMVEContext),
+    .read_probe     = ipmovie_probe,
+    .read_header    = ipmovie_read_header,
+    .read_packet    = ipmovie_read_packet,
 };

@@ -23,7 +23,7 @@
  * @file
  * @brief Brute Force & Ignorance (.bfi) file demuxer
  * @author Sisir Koppaka ( sisir.koppaka at gmail dot com )
- * @sa http://wiki.multimedia.cx/index.php?title=BFI
+ * @see http://wiki.multimedia.cx/index.php?title=BFI
  */
 
 #include "libavutil/intreadwrite.h"
@@ -55,12 +55,12 @@ static int bfi_read_header(AVFormatContext * s, AVFormatParameters * ap)
     int fps, chunk_header;
 
     /* Initialize the video codec... */
-    vstream = av_new_stream(s, 0);
+    vstream = avformat_new_stream(s, NULL);
     if (!vstream)
         return AVERROR(ENOMEM);
 
     /* Initialize the audio codec... */
-    astream = av_new_stream(s, 0);
+    astream = avformat_new_stream(s, NULL);
     if (!astream)
         return AVERROR(ENOMEM);
 
@@ -159,10 +159,10 @@ static int bfi_read_packet(AVFormatContext * s, AVPacket * pkt)
 }
 
 AVInputFormat ff_bfi_demuxer = {
-    "bfi",
-    NULL_IF_CONFIG_SMALL("Brute Force & Ignorance"),
-    sizeof(BFIContext),
-    bfi_probe,
-    bfi_read_header,
-    bfi_read_packet,
+    .name           = "bfi",
+    .long_name      = NULL_IF_CONFIG_SMALL("Brute Force & Ignorance"),
+    .priv_data_size = sizeof(BFIContext),
+    .read_probe     = bfi_probe,
+    .read_header    = bfi_read_header,
+    .read_packet    = bfi_read_packet,
 };

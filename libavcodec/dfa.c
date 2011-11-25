@@ -339,7 +339,7 @@ static int dfa_decode_frame(AVCodecContext *avctx,
             tmp_buf = buf;
             for (i = 0; i < pal_elems; i++) {
                 s->pal[i] = bytestream_get_be24(&tmp_buf) << 2;
-                s->pal[i] |= (s->pal[i] >> 6) & 0x333;
+                s->pal[i] |= 0xFF << 24 | (s->pal[i] >> 6) & 0x30303;
             }
             s->pic.palette_has_changed = 1;
         } else if (chunk_type <= 9) {
@@ -384,14 +384,13 @@ static av_cold int dfa_decode_end(AVCodecContext *avctx)
 }
 
 AVCodec ff_dfa_decoder = {
-    "dfa",
-    AVMEDIA_TYPE_VIDEO,
-    CODEC_ID_DFA,
-    sizeof(DfaContext),
-    dfa_decode_init,
-    NULL,
-    dfa_decode_end,
-    dfa_decode_frame,
-    CODEC_CAP_DR1,
+    .name           = "dfa",
+    .type           = AVMEDIA_TYPE_VIDEO,
+    .id             = CODEC_ID_DFA,
+    .priv_data_size = sizeof(DfaContext),
+    .init           = dfa_decode_init,
+    .close          = dfa_decode_end,
+    .decode         = dfa_decode_frame,
+    .capabilities   = CODEC_CAP_DR1,
     .long_name = NULL_IF_CONFIG_SMALL("Chronomaster DFA"),
 };

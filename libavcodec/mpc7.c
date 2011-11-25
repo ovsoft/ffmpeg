@@ -61,6 +61,13 @@ static av_cold int mpc7_decode_init(AVCodecContext * avctx)
     static VLC_TYPE hdr_table[1 << MPC7_HDR_BITS][2];
     static VLC_TYPE quant_tables[7224][2];
 
+    /* Musepack SV7 is always stereo */
+    if (avctx->channels != 2) {
+        av_log_ask_for_sample(avctx, "Unsupported number of channels: %d\n",
+                              avctx->channels);
+        return AVERROR_PATCHWELCOME;
+    }
+
     if(avctx->extradata_size < 16){
         av_log(avctx, AV_LOG_ERROR, "Too small extradata size (%i)!\n", avctx->extradata_size);
         return -1;
@@ -88,7 +95,7 @@ static av_cold int mpc7_decode_init(AVCodecContext * avctx)
     c->frames_to_skip = 0;
 
     avctx->sample_fmt = AV_SAMPLE_FMT_S16;
-    avctx->channel_layout = (avctx->channels==2) ? AV_CH_LAYOUT_STEREO : AV_CH_LAYOUT_MONO;
+    avctx->channel_layout = AV_CH_LAYOUT_STEREO;
 
     if(vlc_initialized) return 0;
     av_log(avctx, AV_LOG_DEBUG, "Initing VLC\n");
@@ -197,12 +204,19 @@ static int mpc7_decode_frame(AVCodecContext * avctx,
     int i, ch;
     int mb = -1;
     Band *bands = c->bands;
-    int off;
+    int off, out_size;
     int bits_used, bits_avail;
 
-    memset(bands, 0, sizeof(bands));
+    memset(bands, 0, sizeof(*bands) * (c->maxbands + 1));
     if(buf_size <= 4){
         av_log(avctx, AV_LOG_ERROR, "Too small buffer passed (%i bytes)\n", buf_size);
+        return AVERROR(EINVAL);
+    }
+
+    out_size = (buf[1] ? c->lastframelen : MPC_FRAME_SIZE) * 4;
+    if (*data_size < out_size) {
+        av_log(avctx, AV_LOG_ERROR, "Output buffer is too small\n");
+        return AVERROR(EINVAL);
     }
 
     bits = av_malloc(((buf_size - 1) & ~3) + FF_INPUT_BUFFER_PADDING_SIZE);
@@ -277,7 +291,7 @@ static int mpc7_decode_frame(AVCodecContext * avctx,
         *data_size = 0;
         return buf_size;
     }
-    *data_size = (buf[1] ? c->lastframelen : MPC_FRAME_SIZE) * 4;
+    *data_size = out_size;
 
     return buf_size;
 }
@@ -291,14 +305,12 @@ static void mpc7_decode_flush(AVCodecContext *avctx)
 }
 
 AVCodec ff_mpc7_decoder = {
-    "mpc7",
-    AVMEDIA_TYPE_AUDIO,
-    CODEC_ID_MUSEPACK7,
-    sizeof(MPCContext),
-    mpc7_decode_init,
-    NULL,
-    NULL,
-    mpc7_decode_frame,
+    .name           = "mpc7",
+    .type           = AVMEDIA_TYPE_AUDIO,
+    .id             = CODEC_ID_MUSEPACK7,
+    .priv_data_size = sizeof(MPCContext),
+    .init           = mpc7_decode_init,
+    .decode         = mpc7_decode_frame,
     .flush = mpc7_decode_flush,
     .long_name = NULL_IF_CONFIG_SMALL("Musepack SV7"),
 };

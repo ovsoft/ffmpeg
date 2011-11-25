@@ -289,7 +289,7 @@ static av_cold int read_specific_config(ALSDecContext *ctx)
 
     init_get_bits(&gb, avctx->extradata, avctx->extradata_size * 8);
 
-    config_offset = ff_mpeg4audio_get_config(&m4ac, avctx->extradata,
+    config_offset = avpriv_mpeg4audio_get_config(&m4ac, avctx->extradata,
                                              avctx->extradata_size);
 
     if (config_offset < 0)
@@ -393,7 +393,7 @@ static av_cold int read_specific_config(ALSDecContext *ctx)
         if (get_bits_left(&gb) < 32)
             return -1;
 
-        if (avctx->error_recognition >= FF_ER_CAREFUL) {
+        if (avctx->err_recognition & (AV_EF_CRCCHECK|AV_EF_CAREFUL)) {
             ctx->crc_table = av_crc_get_table(AV_CRC_32_IEEE_LE);
             ctx->crc       = 0xFFFFFFFF;
             ctx->crc_org   = ~get_bits_long(&gb, 32);
@@ -1442,7 +1442,7 @@ static int decode_frame(AVCodecContext *avctx,
         ctx->cur_frame_length = sconf->frame_length;
 
     // decode the frame data
-    if ((invalid_frame = read_frame_data(ctx, ra_frame) < 0))
+    if ((invalid_frame = read_frame_data(ctx, ra_frame)) < 0)
         av_log(ctx->avctx, AV_LOG_WARNING,
                "Reading frame data failed. Skipping RA unit.\n");
 
@@ -1476,7 +1476,7 @@ static int decode_frame(AVCodecContext *avctx,
     }
 
     // update CRC
-    if (sconf->crc_enabled && avctx->error_recognition >= FF_ER_CAREFUL) {
+    if (sconf->crc_enabled && (avctx->err_recognition & (AV_EF_CRCCHECK|AV_EF_CAREFUL))) {
         int swap = HAVE_BIGENDIAN != sconf->msb_first;
 
         if (ctx->avctx->bits_per_raw_sample == 24) {
@@ -1710,7 +1710,7 @@ static av_cold int decode_init(AVCodecContext *avctx)
 
     // allocate crc buffer
     if (HAVE_BIGENDIAN != sconf->msb_first && sconf->crc_enabled &&
-        avctx->error_recognition >= FF_ER_CAREFUL) {
+        (avctx->err_recognition & (AV_EF_CRCCHECK|AV_EF_CAREFUL))) {
         ctx->crc_buffer = av_malloc(sizeof(*ctx->crc_buffer) *
                                     ctx->cur_frame_length *
                                     avctx->channels *
@@ -1739,14 +1739,13 @@ static av_cold void flush(AVCodecContext *avctx)
 
 
 AVCodec ff_als_decoder = {
-    "als",
-    AVMEDIA_TYPE_AUDIO,
-    CODEC_ID_MP4ALS,
-    sizeof(ALSDecContext),
-    decode_init,
-    NULL,
-    decode_end,
-    decode_frame,
+    .name           = "als",
+    .type           = AVMEDIA_TYPE_AUDIO,
+    .id             = CODEC_ID_MP4ALS,
+    .priv_data_size = sizeof(ALSDecContext),
+    .init           = decode_init,
+    .close          = decode_end,
+    .decode         = decode_frame,
     .flush = flush,
     .capabilities = CODEC_CAP_SUBFRAMES,
     .long_name = NULL_IF_CONFIG_SMALL("MPEG-4 Audio Lossless Coding (ALS)"),

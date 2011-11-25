@@ -104,7 +104,7 @@ static int vmd_read_header(AVFormatContext *s,
     else
         vmd->is_indeo3 = 0;
     /* start up the decoders */
-    vst = av_new_stream(s, 0);
+    vst = avformat_new_stream(s, NULL);
     if (!vst)
         return AVERROR(ENOMEM);
     av_set_pts_info(vst, 33, 1, 10);
@@ -125,7 +125,7 @@ static int vmd_read_header(AVFormatContext *s,
     /* if sample rate is 0, assume no audio */
     vmd->sample_rate = AV_RL16(&vmd->vmd_header[804]);
     if (vmd->sample_rate) {
-        st = av_new_stream(s, 0);
+        st = avformat_new_stream(s, NULL);
         if (!st)
             return AVERROR(ENOMEM);
         vmd->audio_stream_index = st->index;
@@ -281,11 +281,11 @@ static int vmd_read_close(AVFormatContext *s)
 }
 
 AVInputFormat ff_vmd_demuxer = {
-    "vmd",
-    NULL_IF_CONFIG_SMALL("Sierra VMD format"),
-    sizeof(VmdDemuxContext),
-    vmd_probe,
-    vmd_read_header,
-    vmd_read_packet,
-    vmd_read_close,
+    .name           = "vmd",
+    .long_name      = NULL_IF_CONFIG_SMALL("Sierra VMD format"),
+    .priv_data_size = sizeof(VmdDemuxContext),
+    .read_probe     = vmd_probe,
+    .read_header    = vmd_read_header,
+    .read_packet    = vmd_read_packet,
+    .read_close     = vmd_read_close,
 };

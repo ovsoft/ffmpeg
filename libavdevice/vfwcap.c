@@ -242,7 +242,7 @@ static int vfw_read_header(AVFormatContext *s, AVFormatParameters *ap)
     AVStream *st;
     int devnum;
     int bisize;
-    BITMAPINFO *bi;
+    BITMAPINFO *bi = NULL;
     CAPTUREPARMS cparms;
     DWORD biCompression;
     WORD biBitCount;
@@ -264,11 +264,6 @@ static int vfw_read_header(AVFormatContext *s, AVFormatParameters *ap)
         }
         return AVERROR(EIO);
     }
-
-#if FF_API_FORMAT_PARAMETERS
-    if (ap->time_base.num)
-        framerate_q = (AVRational){ap->time_base.den, ap->time_base.num};
-#endif
 
     ctx->hwnd = capCreateCaptureWindow(NULL, 0, 0, 0, 0, 0, HWND_MESSAGE, 0);
     if(!ctx->hwnd) {
@@ -293,12 +288,12 @@ static int vfw_read_header(AVFormatContext *s, AVFormatParameters *ap)
                       (LPARAM) videostream_cb);
     if(!ret) {
         av_log(s, AV_LOG_ERROR, "Could not set video stream callback.\n");
-        goto fail_io;
+        goto fail;
     }
 
     SetWindowLongPtr(ctx->hwnd, GWLP_USERDATA, (LONG_PTR) s);
 
-    st = av_new_stream(s, 0);
+    st = avformat_new_stream(s, NULL);
     if(!st) {
         vfw_read_close(s);
         return AVERROR(ENOMEM);
@@ -307,7 +302,7 @@ static int vfw_read_header(AVFormatContext *s, AVFormatParameters *ap)
     /* Set video format */
     bisize = SendMessage(ctx->hwnd, WM_CAP_GET_VIDEOFORMAT, 0, 0);
     if(!bisize)
-        goto fail_io;
+        goto fail;
     bi = av_malloc(bisize);
     if(!bi) {
         vfw_read_close(s);
@@ -315,24 +310,23 @@ static int vfw_read_header(AVFormatContext *s, AVFormatParameters *ap)
     }
     ret = SendMessage(ctx->hwnd, WM_CAP_GET_VIDEOFORMAT, bisize, (LPARAM) bi);
     if(!ret)
-        goto fail_bi;
+        goto fail;
 
     dump_bih(s, &bi->bmiHeader);
 
+    ret = av_parse_video_rate(&framerate_q, ctx->framerate);
+    if (ret < 0) {
+        av_log(s, AV_LOG_ERROR, "Could not parse framerate '%s'.\n", ctx->framerate);
+        goto fail;
+    }
 
     if (ctx->video_size) {
         ret = av_parse_video_size(&bi->bmiHeader.biWidth, &bi->bmiHeader.biHeight, ctx->video_size);
         if (ret < 0) {
             av_log(s, AV_LOG_ERROR, "Couldn't parse video size.\n");
-            goto fail_bi;
+            goto fail;
         }
     }
-#if FF_API_FORMAT_PARAMETERS
-    if (ap->width > 0)
-        bi->bmiHeader.biWidth = ap->width;
-    if (ap->height > 0)
-        bi->bmiHeader.biHeight = ap->height;
-#endif
 
     if (0) {
         /* For testing yet unsupported compressions
@@ -349,19 +343,17 @@ static int vfw_read_header(AVFormatContext *s, AVFormatParameters *ap)
     ret = SendMessage(ctx->hwnd, WM_CAP_SET_VIDEOFORMAT, bisize, (LPARAM) bi);
     if(!ret) {
         av_log(s, AV_LOG_ERROR, "Could not set Video Format.\n");
-        goto fail_bi;
+        goto fail;
     }
 
     biCompression = bi->bmiHeader.biCompression;
     biBitCount = bi->bmiHeader.biBitCount;
 
-    av_free(bi);
-
     /* Set sequence setup */
     ret = SendMessage(ctx->hwnd, WM_CAP_GET_SEQUENCE_SETUP, sizeof(cparms),
                       (LPARAM) &cparms);
     if(!ret)
-        goto fail_io;
+        goto fail;
 
     dump_captureparms(s, &cparms);
 
@@ -376,7 +368,7 @@ static int vfw_read_header(AVFormatContext *s, AVFormatParameters *ap)
     ret = SendMessage(ctx->hwnd, WM_CAP_SET_SEQUENCE_SETUP, sizeof(cparms),
                       (LPARAM) &cparms);
     if(!ret)
-        goto fail_io;
+        goto fail;
 
     codec = st->codec;
     codec->time_base = (AVRational){framerate_q.den, framerate_q.num};
@@ -405,31 +397,31 @@ static int vfw_read_header(AVFormatContext *s, AVFormatParameters *ap)
         }
     }
 
+    av_freep(&bi);
+
     av_set_pts_info(st, 32, 1, 1000);
 
     ctx->mutex = CreateMutex(NULL, 0, NULL);
     if(!ctx->mutex) {
         av_log(s, AV_LOG_ERROR, "Could not create Mutex.\n" );
-        goto fail_io;
+        goto fail;
     }
     ctx->event = CreateEvent(NULL, 1, 0, NULL);
     if(!ctx->event) {
         av_log(s, AV_LOG_ERROR, "Could not create Event.\n" );
-        goto fail_io;
+        goto fail;
     }
 
     ret = SendMessage(ctx->hwnd, WM_CAP_SEQUENCE_NOFILE, 0, 0);
     if(!ret) {
         av_log(s, AV_LOG_ERROR, "Could not start capture sequence.\n" );
-        goto fail_io;
+        goto fail;
     }
 
     return 0;
 
-fail_bi:
-    av_free(bi);
-
-fail_io:
+fail:
+    av_freep(&bi);
     vfw_read_close(s);
     return AVERROR(EIO);
 }
@@ -466,8 +458,8 @@ static int vfw_read_packet(AVFormatContext *s, AVPacket *pkt)
 #define OFFSET(x) offsetof(struct vfw_ctx, x)
 #define DEC AV_OPT_FLAG_DECODING_PARAM
 static const AVOption options[] = {
-    { "video_size", "A string describing frame size, such as 640x480 or hd720.", OFFSET(video_size), FF_OPT_TYPE_STRING, {.str = NULL}, 0, 0, DEC },
-    { "framerate", "", OFFSET(framerate), FF_OPT_TYPE_STRING, {.str = "ntsc"}, 0, 0, DEC },
+    { "video_size", "A string describing frame size, such as 640x480 or hd720.", OFFSET(video_size), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, DEC },
+    { "framerate", "", OFFSET(framerate), AV_OPT_TYPE_STRING, {.str = "ntsc"}, 0, 0, DEC },
     { NULL },
 };
 
@@ -479,13 +471,12 @@ static const AVClass vfw_class = {
 };
 
 AVInputFormat ff_vfwcap_demuxer = {
-    "vfwcap",
-    NULL_IF_CONFIG_SMALL("VFW video capture"),
-    sizeof(struct vfw_ctx),
-    NULL,
-    vfw_read_header,
-    vfw_read_packet,
-    vfw_read_close,
-    .flags = AVFMT_NOFILE,
-    .priv_class = &vfw_class,
+    .name           = "vfwcap",
+    .long_name      = NULL_IF_CONFIG_SMALL("VfW video capture"),
+    .priv_data_size = sizeof(struct vfw_ctx),
+    .read_header    = vfw_read_header,
+    .read_packet    = vfw_read_packet,
+    .read_close     = vfw_read_close,
+    .flags          = AVFMT_NOFILE,
+    .priv_class     = &vfw_class,
 };

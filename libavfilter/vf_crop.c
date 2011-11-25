@@ -32,14 +32,16 @@
 #include "libavutil/imgutils.h"
 #include "libavutil/mathematics.h"
 
-static const char *var_names[] = {
-    "E",
-    "PHI",
-    "PI",
+static const char * const var_names[] = {
     "in_w", "iw",   ///< width  of the input video
     "in_h", "ih",   ///< height of the input video
     "out_w", "ow",  ///< width  of the cropped video
     "out_h", "oh",  ///< height of the cropped video
+    "a",
+    "sar",
+    "dar",
+    "hsub",
+    "vsub",
     "x",
     "y",
     "n",            ///< number of frame
@@ -49,13 +51,15 @@ static const char *var_names[] = {
 };
 
 enum var_name {
-    VAR_E,
-    VAR_PHI,
-    VAR_PI,
     VAR_IN_W,  VAR_IW,
     VAR_IN_H,  VAR_IH,
     VAR_OUT_W, VAR_OW,
     VAR_OUT_H, VAR_OH,
+    VAR_A,
+    VAR_SAR,
+    VAR_DAR,
+    VAR_HSUB,
+    VAR_VSUB,
     VAR_X,
     VAR_Y,
     VAR_N,
@@ -157,11 +161,13 @@ static int config_input(AVFilterLink *link)
     const char *expr;
     double res;
 
-    crop->var_values[VAR_E]     = M_E;
-    crop->var_values[VAR_PHI]   = M_PHI;
-    crop->var_values[VAR_PI]    = M_PI;
     crop->var_values[VAR_IN_W]  = crop->var_values[VAR_IW] = ctx->inputs[0]->w;
     crop->var_values[VAR_IN_H]  = crop->var_values[VAR_IH] = ctx->inputs[0]->h;
+    crop->var_values[VAR_A]     = (float) link->w / link->h;
+    crop->var_values[VAR_SAR]   = link->sample_aspect_ratio.num ? av_q2d(link->sample_aspect_ratio) : 1;
+    crop->var_values[VAR_DAR]   = crop->var_values[VAR_A] * crop->var_values[VAR_SAR];
+    crop->var_values[VAR_HSUB]  = 1<<pix_desc->log2_chroma_w;
+    crop->var_values[VAR_VSUB]  = 1<<pix_desc->log2_chroma_h;
     crop->var_values[VAR_X]     = NAN;
     crop->var_values[VAR_Y]     = NAN;
     crop->var_values[VAR_OUT_W] = crop->var_values[VAR_OW] = NAN;
@@ -327,7 +333,7 @@ AVFilter avfilter_vf_crop = {
     .init          = init,
     .uninit        = uninit,
 
-    .inputs    = (AVFilterPad[]) {{ .name             = "default",
+    .inputs    = (const AVFilterPad[]) {{ .name       = "default",
                                     .type             = AVMEDIA_TYPE_VIDEO,
                                     .start_frame      = start_frame,
                                     .draw_slice       = draw_slice,
@@ -335,7 +341,7 @@ AVFilter avfilter_vf_crop = {
                                     .get_video_buffer = avfilter_null_get_video_buffer,
                                     .config_props     = config_input, },
                                   { .name = NULL}},
-    .outputs   = (AVFilterPad[]) {{ .name             = "default",
+    .outputs   = (const AVFilterPad[]) {{ .name       = "default",
                                     .type             = AVMEDIA_TYPE_VIDEO,
                                     .config_props     = config_output, },
                                   { .name = NULL}},

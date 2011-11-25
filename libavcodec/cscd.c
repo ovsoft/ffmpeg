@@ -149,7 +149,7 @@ static int decode_frame(AVCodecContext *avctx, void *data, int *data_size,
 
     if (c->pic.data[0])
         avctx->release_buffer(avctx, &c->pic);
-    c->pic.reference = 1;
+    c->pic.reference = 3;
     c->pic.buffer_hints = FF_BUFFER_HINTS_VALID | FF_BUFFER_HINTS_READABLE |
                           FF_BUFFER_HINTS_PRESERVE | FF_BUFFER_HINTS_REUSABLE;
     if (avctx->get_buffer(avctx, &c->pic) < 0) {
@@ -256,15 +256,14 @@ static av_cold int decode_end(AVCodecContext *avctx) {
 }
 
 AVCodec ff_cscd_decoder = {
-    "camstudio",
-    AVMEDIA_TYPE_VIDEO,
-    CODEC_ID_CSCD,
-    sizeof(CamStudioContext),
-    decode_init,
-    NULL,
-    decode_end,
-    decode_frame,
-    CODEC_CAP_DR1,
+    .name           = "camstudio",
+    .type           = AVMEDIA_TYPE_VIDEO,
+    .id             = CODEC_ID_CSCD,
+    .priv_data_size = sizeof(CamStudioContext),
+    .init           = decode_init,
+    .close          = decode_end,
+    .decode         = decode_frame,
+    .capabilities   = CODEC_CAP_DR1,
     .long_name = NULL_IF_CONFIG_SMALL("CamStudio"),
 };
 

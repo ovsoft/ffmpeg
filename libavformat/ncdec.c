@@ -45,7 +45,7 @@ static int nc_probe(AVProbeData *probe_packet)
 
 static int nc_read_header(AVFormatContext *s, AVFormatParameters *ap)
 {
-    AVStream *st = av_new_stream(s, 0);
+    AVStream *st = avformat_new_stream(s, NULL);
 
     if (!st)
         return AVERROR(ENOMEM);
@@ -91,11 +91,10 @@ static int nc_read_packet(AVFormatContext *s, AVPacket *pkt)
 }
 
 AVInputFormat ff_nc_demuxer = {
-    "nc",
-    NULL_IF_CONFIG_SMALL("NC camera feed format"),
-    0,
-    nc_probe,
-    nc_read_header,
-    nc_read_packet,
+    .name           = "nc",
+    .long_name      = NULL_IF_CONFIG_SMALL("NC camera feed format"),
+    .read_probe     = nc_probe,
+    .read_header    = nc_read_header,
+    .read_packet    = nc_read_packet,
     .extensions = "v",
 };

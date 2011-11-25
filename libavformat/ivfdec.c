@@ -40,7 +40,7 @@ static int read_header(AVFormatContext *s, AVFormatParameters *ap)
     avio_rl16(s->pb); // version
     avio_rl16(s->pb); // header size
 
-    st = av_new_stream(s, 0);
+    st = avformat_new_stream(s, NULL);
     if (!st)
         return AVERROR(ENOMEM);
 
@@ -80,12 +80,11 @@ static int read_packet(AVFormatContext *s, AVPacket *pkt)
 }
 
 AVInputFormat ff_ivf_demuxer = {
-    "ivf",
-    NULL_IF_CONFIG_SMALL("On2 IVF"),
-    0,
-    probe,
-    read_header,
-    read_packet,
+    .name           = "ivf",
+    .long_name      = NULL_IF_CONFIG_SMALL("On2 IVF"),
+    .read_probe     = probe,
+    .read_header    = read_header,
+    .read_packet    = read_packet,
     .flags= AVFMT_GENERIC_INDEX,
     .codec_tag = (const AVCodecTag*[]){ff_codec_bmp_tags, 0},
 };

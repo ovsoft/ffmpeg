@@ -107,7 +107,7 @@ static int cin_read_header(AVFormatContext *s, AVFormatParameters *ap)
     cin->audio_buffer_size = 0;
 
     /* initialize the video decoder stream */
-    st = av_new_stream(s, 0);
+    st = avformat_new_stream(s, NULL);
     if (!st)
         return AVERROR(ENOMEM);
 
@@ -120,7 +120,7 @@ static int cin_read_header(AVFormatContext *s, AVFormatParameters *ap)
     st->codec->height = hdr->video_frame_height;
 
     /* initialize the audio decoder stream */
-    st = av_new_stream(s, 0);
+    st = avformat_new_stream(s, NULL);
     if (!st)
         return AVERROR(ENOMEM);
 
@@ -131,9 +131,8 @@ static int cin_read_header(AVFormatContext *s, AVFormatParameters *ap)
     st->codec->codec_tag = 0;  /* no tag */
     st->codec->channels = 1;
     st->codec->sample_rate = 22050;
-    st->codec->bits_per_coded_sample = 16;
+    st->codec->bits_per_coded_sample = 8;
     st->codec->bit_rate = st->codec->sample_rate * st->codec->bits_per_coded_sample * st->codec->channels;
-    st->codec->block_align = st->codec->channels * st->codec->bits_per_coded_sample;
 
     return 0;
 }
@@ -211,16 +210,17 @@ static int cin_read_packet(AVFormatContext *s, AVPacket *pkt)
 
     pkt->stream_index = cin->audio_stream_index;
     pkt->pts = cin->audio_stream_pts;
-    cin->audio_stream_pts += cin->audio_buffer_size * 2 / cin->file_header.audio_frame_size;
+    pkt->duration = cin->audio_buffer_size - (pkt->pts == 0);
+    cin->audio_stream_pts += pkt->duration;
     cin->audio_buffer_size = 0;
     return 0;
 }
 
 AVInputFormat ff_dsicin_demuxer = {
-    "dsicin",
-    NULL_IF_CONFIG_SMALL("Delphine Software International CIN format"),
-    sizeof(CinDemuxContext),
-    cin_probe,
-    cin_read_header,
-    cin_read_packet,
+    .name           = "dsicin",
+    .long_name      = NULL_IF_CONFIG_SMALL("Delphine Software International CIN format"),
+    .priv_data_size = sizeof(CinDemuxContext),
+    .read_probe     = cin_probe,
+    .read_header    = cin_read_header,
+    .read_packet    = cin_read_packet,
 };

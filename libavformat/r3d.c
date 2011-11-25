@@ -52,7 +52,7 @@ static int read_atom(AVFormatContext *s, Atom *atom)
 
 static int r3d_read_red1(AVFormatContext *s)
 {
-    AVStream *st = av_new_stream(s, 0);
+    AVStream *st = avformat_new_stream(s, NULL);
     char filename[258];
     int tmp;
     int av_unused tmp2;
@@ -89,7 +89,7 @@ static int r3d_read_red1(AVFormatContext *s)
     tmp = avio_r8(s->pb); // audio channels
     av_dlog(s, "audio channels %d\n", tmp);
     if (tmp > 0) {
-        AVStream *ast = av_new_stream(s, 1);
+        AVStream *ast = avformat_new_stream(s, NULL);
         if (!ast)
             return AVERROR(ENOMEM);
         ast->codec->codec_type = AVMEDIA_TYPE_AUDIO;
@@ -365,7 +365,8 @@ static int r3d_seek(AVFormatContext *s, int stream_index, int64_t sample_time, i
             frame_num, sample_time);
 
     if (frame_num < r3d->video_offsets_count) {
-        avio_seek(s->pb, r3d->video_offsets_count, SEEK_SET);
+        if (avio_seek(s->pb, r3d->video_offsets_count, SEEK_SET) < 0)
+            return -1;
     } else {
         av_log(s, AV_LOG_ERROR, "could not seek to frame %d\n", frame_num);
         return -1;
@@ -384,12 +385,12 @@ static int r3d_close(AVFormatContext *s)
 }
 
 AVInputFormat ff_r3d_demuxer = {
-    "r3d",
-    NULL_IF_CONFIG_SMALL("REDCODE R3D format"),
-    sizeof(R3DContext),
-    r3d_probe,
-    r3d_read_header,
-    r3d_read_packet,
-    r3d_close,
-    r3d_seek,
+    .name           = "r3d",
+    .long_name      = NULL_IF_CONFIG_SMALL("REDCODE R3D format"),
+    .priv_data_size = sizeof(R3DContext),
+    .read_probe     = r3d_probe,
+    .read_header    = r3d_read_header,
+    .read_packet    = r3d_read_packet,
+    .read_close     = r3d_close,
+    .read_seek      = r3d_seek,
 };

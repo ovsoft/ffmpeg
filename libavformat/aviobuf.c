@@ -1,5 +1,5 @@
 /*
- * Buffered I/O for ffmpeg system
+ * buffered I/O
  * Copyright (c) 2000,2001 Fabrice Bellard
  *
  * This file is part of FFmpeg.
@@ -20,7 +20,10 @@
  */
 
 #include "libavutil/crc.h"
+#include "libavutil/dict.h"
 #include "libavutil/intreadwrite.h"
+#include "libavutil/log.h"
+#include "libavutil/opt.h"
 #include "avformat.h"
 #include "avio.h"
 #include "avio_internal.h"
@@ -37,6 +40,31 @@
  */
 #define SHORT_SEEK_THRESHOLD 4096
 
+#if !FF_API_OLD_AVIO
+static void *ffio_url_child_next(void *obj, void *prev)
+{
+    AVIOContext *s = obj;
+    return prev ? NULL : s->opaque;
+}
+
+static const AVClass *ffio_url_child_class_next(const AVClass *prev)
+{
+    return prev ? NULL : &ffurl_context_class;
+}
+
+static const AVOption ffio_url_options[] = {
+    { NULL },
+};
+
+const AVClass ffio_url_class = {
+    .class_name = "AVIOContext",
+    .item_name  = av_default_item_name,
+    .version    = LIBAVUTIL_VERSION_INT,
+    .option     = ffio_url_options,
+    .child_next = ffio_url_child_next,
+    .child_class_next = ffio_url_child_class_next,
+};
+#endif
 static void fill_buffer(AVIOContext *s);
 static int url_resetbuf(AVIOContext *s, int flags);
 
@@ -778,13 +806,14 @@ int avio_get_str(AVIOContext *s, int maxlen, char *buf, int buflen)
 {
     int i;
 
+    if (buflen <= 0)
+        return AVERROR(EINVAL);
     // reserve 1 byte for terminating 0
     buflen = FFMIN(buflen - 1, maxlen);
     for (i = 0; i < buflen; i++)
         if (!(buf[i] = avio_r8(s)))
             return i + 1;
-    if (buflen)
-        buf[i] = 0;
+    buf[i] = 0;
     for (; i < maxlen; i++)
         if (!avio_r8(s))
             return i + 1;
@@ -796,6 +825,8 @@ int avio_get_str(AVIOContext *s, int maxlen, char *buf, int buflen)
 {\
     char* q = buf;\
     int ret = 0;\
+    if (buflen <= 0) \
+        return AVERROR(EINVAL); \
     while (ret + 1 < maxlen) {\
         uint8_t tmp;\
         uint32_t ch;\
@@ -847,19 +878,13 @@ int ffio_fdopen(AVIOContext **s, URLContext *h)
     if (!buffer)
         return AVERROR(ENOMEM);
 
-    *s = av_mallocz(sizeof(AVIOContext));
-    if(!*s) {
+    *s = avio_alloc_context(buffer, buffer_size, h->flags & AVIO_FLAG_WRITE, h,
+                            ffurl_read, ffurl_write, ffurl_seek);
+    if (!*s) {
         av_free(buffer);
         return AVERROR(ENOMEM);
     }
 
-    if (ffio_init_context(*s, buffer, buffer_size,
-                      h->flags & AVIO_FLAG_WRITE, h,
-                      (void*)ffurl_read, (void*)ffurl_write, (void*)ffurl_seek) < 0) {
-        av_free(buffer);
-        av_freep(s);
-        return AVERROR(EIO);
-    }
 #if FF_API_OLD_AVIO
     (*s)->is_streamed = h->is_streamed;
 #endif
@@ -869,6 +894,9 @@ int ffio_fdopen(AVIOContext **s, URLContext *h)
         (*s)->read_pause = (int (*)(void *, int))h->prot->url_read_pause;
         (*s)->read_seek  = (int64_t (*)(void *, int, int64_t, int))h->prot->url_read_seek;
     }
+#if !FF_API_OLD_AVIO
+    (*s)->av_class = &ffio_url_class;
+#endif
     return 0;
 }
 
@@ -921,7 +949,7 @@ int ffio_rewind_with_probe_data(AVIOContext *s, unsigned char *buf, int buf_size
 
     alloc_size = FFMAX(s->buffer_size, new_size);
     if (alloc_size > buf_size)
-        if (!(buf = av_realloc(buf, alloc_size)))
+        if (!(buf = av_realloc_f(buf, 1, alloc_size)))
             return AVERROR(ENOMEM);
 
     if (new_size > buf_size) {
@@ -942,10 +970,16 @@ int ffio_rewind_with_probe_data(AVIOContext *s, unsigned char *buf, int buf_size
 
 int avio_open(AVIOContext **s, const char *filename, int flags)
 {
+    return avio_open2(s, filename, flags, NULL, NULL);
+}
+
+int avio_open2(AVIOContext **s, const char *filename, int flags,
+               const AVIOInterruptCB *int_cb, AVDictionary **options)
+{
     URLContext *h;
     int err;
 
-    err = ffurl_open(&h, filename, flags);
+    err = ffurl_open(&h, filename, flags, int_cb, options);
     if (err < 0)
         return err;
     err = ffio_fdopen(s, h);
@@ -1090,7 +1124,7 @@ static int dyn_buf_write(void *opaque, uint8_t *buf, int buf_size)
     }
 
     if (new_allocated_size > d->allocated_size) {
-        d->buffer = av_realloc(d->buffer, new_allocated_size);
+        d->buffer = av_realloc_f(d->buffer, 1, new_allocated_size);
         if(d->buffer == NULL)
              return AVERROR(ENOMEM);
         d->allocated_size = new_allocated_size;
