@@ -29,7 +29,7 @@
 #include "libavutil/rational.h"
 
 #define LIBAVFILTER_VERSION_MAJOR  2
-#define LIBAVFILTER_VERSION_MINOR 49
+#define LIBAVFILTER_VERSION_MINOR 50
 #define LIBAVFILTER_VERSION_MICRO  0
 
 #define LIBAVFILTER_VERSION_INT AV_VERSION_INT(LIBAVFILTER_VERSION_MAJOR, \
@@ -110,7 +110,7 @@ typedef struct AVFilterBuffer {
  * per reference properties must be separated out.
  */
 typedef struct AVFilterBufferRefAudioProps {
-    int64_t channel_layout;     ///< channel layout of audio buffer
+    uint64_t channel_layout;    ///< channel layout of audio buffer
     int nb_samples;             ///< number of audio samples per channel
     int sample_rate;            ///< audio buffer sample rate
     int planar;                 ///< audio buffer - planar or packed
@@ -361,8 +361,7 @@ struct AVFilterPad {
     const char *name;
 
     /**
-     * AVFilterPad type. Only video supported now, hopefully someone will
-     * add audio in the future.
+     * AVFilterPad type. Can be AVMEDIA_TYPE_VIDEO or AVMEDIA_TYPE_AUDIO.
      */
     enum AVMediaType type;
 
@@ -641,7 +640,7 @@ struct AVFilterLink {
     int h;                      ///< agreed upon image height
     AVRational sample_aspect_ratio; ///< agreed upon sample aspect ratio
     /* These parameters apply only to audio */
-    int64_t channel_layout;     ///< channel layout of current buffer (see libavutil/audioconvert.h)
+    uint64_t channel_layout;    ///< channel layout of current buffer (see libavutil/audioconvert.h)
 #if LIBAVFILTER_VERSION_MAJOR < 3
     int64_t sample_rate;        ///< samples per second
 #else
@@ -772,8 +771,7 @@ AVFilterBufferRef *avfilter_get_audio_buffer(AVFilterLink *link, int perms,
 AVFilterBufferRef *
 avfilter_get_audio_buffer_ref_from_arrays(uint8_t *data[8], int linesize[8], int perms,
                                           int nb_samples, enum AVSampleFormat sample_fmt,
-                                          int64_t channel_layout, int planar);
-
+                                          uint64_t channel_layout, int planar);
 /**
  * Request an input frame from the filter at the other end of the link.
  *

@@ -1259,7 +1259,7 @@ struct AVCodecInternal;
 typedef struct AVCodecContext {
     /**
      * information on struct for av_log
-     * - set by avcodec_alloc_context
+     * - set by avcodec_alloc_context3
      */
     const AVClass *av_class;
     /**
@@ -2710,9 +2710,9 @@ typedef struct AVCodecContext {
 #endif
 
     /**
-     * GOP timecode frame start number, in non drop frame format
-     * - encoding: Set by user.
-     * - decoding: unused
+     * GOP timecode frame start number
+     * - encoding: Set by user, in non drop frame format
+     * - decoding: Set by libavcodec (timecode in the 25 bits format, -1 if unset)
      */
     int64_t timecode_frame_start;
 
@@ -2758,14 +2758,14 @@ typedef struct AVCodecContext {
      * - encoding: set by user.
      * - decoding: set by user, may be overwritten by libavcodec.
      */
-    int64_t channel_layout;
+    uint64_t channel_layout;
 
     /**
      * Request decoder to use this channel layout if it can (0 for default)
      * - encoding: unused
      * - decoding: Set by user.
      */
-    int64_t request_channel_layout;
+    uint64_t request_channel_layout;
 
     /**
      * Ratecontrol attempt to use, at maximum, <value> of what can be used without an underflow.
@@ -2959,8 +2959,8 @@ typedef struct AVCodecContext {
      * For SUBTITLE_ASS subtitle type, it should contain the whole ASS
      * [Script Info] and [V4+ Styles] section, plus the [Events] line and
      * the Format line following. It shouldn't include any Dialogue line.
-     * - encoding: Set/allocated/freed by user (before avcodec_open())
-     * - decoding: Set/allocated/freed by libavcodec (by avcodec_open())
+     * - encoding: Set/allocated/freed by user (before avcodec_open2())
+     * - decoding: Set/allocated/freed by libavcodec (by avcodec_open2())
      */
     uint8_t *subtitle_header;
     int subtitle_header_size;
@@ -3122,7 +3122,7 @@ typedef struct AVCodec {
     const char *long_name;
     const int *supported_samplerates;       ///< array of supported audio samplerates, or NULL if unknown, array is terminated by 0
     const enum AVSampleFormat *sample_fmts; ///< array of supported sample formats, or NULL if unknown, array is terminated by -1
-    const int64_t *channel_layouts;         ///< array of support channel layouts, or NULL if unknown. array is terminated by 0
+    const uint64_t *channel_layouts;         ///< array of support channel layouts, or NULL if unknown. array is terminated by 0
     uint8_t max_lowres;                     ///< maximum value for lowres supported by the decoder
     const AVClass *priv_class;              ///< AVClass for the private context
     const AVProfile *profiles;              ///< array of recognized profiles, or NULL if unknown, array is terminated by {FF_PROFILE_UNKNOWN}
@@ -3853,7 +3853,7 @@ AVCodecContext *avcodec_alloc_context2(enum AVMediaType);
  * resulting struct can be deallocated by simply calling av_free().
  *
  * @param codec if non-NULL, allocate private data and initialize defaults
- *              for the given codec. It is illegal to then call avcodec_open()
+ *              for the given codec. It is illegal to then call avcodec_open2()
  *              with a different codec.
  *
  * @return An AVCodecContext filled with default values or NULL on failure.
@@ -3864,7 +3864,7 @@ AVCodecContext *avcodec_alloc_context3(AVCodec *codec);
 /**
  * Copy the settings of the source AVCodecContext into the destination
  * AVCodecContext. The resulting destination codec context will be
- * unopened, i.e. you are required to call avcodec_open() before you
+ * unopened, i.e. you are required to call avcodec_open2() before you
  * can use this AVCodecContext to decode/encode video/audio data.
  *
  * @param dest target codec context, should be initialized with
@@ -3928,7 +3928,7 @@ enum PixelFormat avcodec_default_get_format(struct AVCodecContext *s, const enum
 
 #if FF_API_THREAD_INIT
 /**
- * @deprecated Set s->thread_count before calling avcodec_open() instead of calling this.
+ * @deprecated Set s->thread_count before calling avcodec_open2() instead of calling this.
  */
 attribute_deprecated
 int avcodec_thread_init(AVCodecContext *s, int thread_count);
@@ -3974,7 +3974,7 @@ int avcodec_open(AVCodecContext *avctx, AVCodec *codec);
 
 /**
  * Initialize the AVCodecContext to use the given AVCodec. Prior to using this
- * function the context has to be allocated with avcodec_alloc_context().
+ * function the context has to be allocated with avcodec_alloc_context3().
  *
  * The functions avcodec_find_decoder_by_name(), avcodec_find_encoder_by_name(),
  * avcodec_find_decoder() and avcodec_find_encoder() provide an easy way for
@@ -3989,9 +3989,9 @@ int avcodec_open(AVCodecContext *avctx, AVCodec *codec);
  * if (!codec)
  *     exit(1);
  *
- * context = avcodec_alloc_context();
+ * context = avcodec_alloc_context3(codec);
  *
- * if (avcodec_open(context, codec, opts) < 0)
+ * if (avcodec_open2(context, codec, opts) < 0)
  *     exit(1);
  * @endcode
  *

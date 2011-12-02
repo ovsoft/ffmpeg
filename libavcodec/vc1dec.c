@@ -501,7 +501,8 @@ static void vc1_mc_1mv(VC1Context *v, int dir)
         uvmy = uvmy - 2 + 4 * v->cur_field_type;
     }
 
-    if (v->fastuvmc && (v->fcm != 1)) { // fastuvmc shall be ignored for interlaced frame picture
+    // fastuvmc shall be ignored for interlaced frame picture
+    if (v->fastuvmc && (v->fcm != ILACE_FRAME)) {
         uvmx = uvmx + ((uvmx < 0) ? (uvmx & 1) : -(uvmx & 1));
         uvmy = uvmy + ((uvmy < 0) ? (uvmy & 1) : -(uvmy & 1));
     }
@@ -685,7 +686,7 @@ static void vc1_mc_4mv_luma(VC1Context *v, int n, int dir)
     uint8_t *srcY;
     int dxy, mx, my, src_x, src_y;
     int off;
-    int fieldmv = (v->fcm == 1) ? v->blk_mv_type[s->block_index[n]] : 0;
+    int fieldmv = (v->fcm == ILACE_FRAME) ? v->blk_mv_type[s->block_index[n]] : 0;
     int v_edge_pos = s->v_edge_pos >> v->field_mode;
 
     if (!v->field_mode && !v->s.last_picture.f.data[0])
@@ -744,7 +745,7 @@ static void vc1_mc_4mv_luma(VC1Context *v, int n, int dir)
             v->mv_f[1][s->block_index[k] + v->blocks_off] = f;
     }
 
-    if (v->fcm == 1) {  // not sure if needed for other types of picture
+    if (v->fcm == ILACE_FRAME) {  // not sure if needed for other types of picture
         int qx, qy;
         int width  = s->avctx->coded_width;
         int height = s->avctx->coded_height >> 1;
@@ -761,7 +762,7 @@ static void vc1_mc_4mv_luma(VC1Context *v, int n, int dir)
             my -= 8 * (qy - height - 1);
     }
 
-    if ((v->fcm == 1) && fieldmv)
+    if ((v->fcm == ILACE_FRAME) && fieldmv)
         off = ((n > 1) ? s->linesize : 0) + (n & 1) * 8;
     else
         off = s->linesize * 4 * (n & 2) + (n & 1) * 8;
@@ -779,7 +780,7 @@ static void vc1_mc_4mv_luma(VC1Context *v, int n, int dir)
         src_y = av_clip(src_y, -16, s->mb_height * 16);
     } else {
         src_x = av_clip(src_x, -17, s->avctx->coded_width);
-        if (v->fcm == 1) {
+        if (v->fcm == ILACE_FRAME) {
             if (src_y & 1)
                 src_y = av_clip(src_y, -17, s->avctx->coded_height + 1);
             else
@@ -2917,7 +2918,7 @@ static int vc1_decode_i_block_adv(VC1Context *v, DCTELEM block[64], int n,
         int k;
 
         if (v->s.ac_pred) {
-            if (!use_pred && v->fcm == 1) {
+            if (!use_pred && v->fcm == ILACE_FRAME) {
                 zz_table = v->zzi_8x8;
             } else {
                 if (!dc_pred_dir) // top
@@ -2926,7 +2927,7 @@ static int vc1_decode_i_block_adv(VC1Context *v, DCTELEM block[64], int n,
                     zz_table = v->zz_8x8[3];
             }
         } else {
-            if (v->fcm != 1)
+            if (v->fcm != ILACE_FRAME)
                 zz_table = v->zz_8x8[1];
             else
                 zz_table = v->zzi_8x8;
@@ -3136,10 +3137,10 @@ static int vc1_decode_intra_block(VC1Context *v, DCTELEM block[64], int n,
             i += skip;
             if (i > 63)
                 break;
-            if (v->fcm == 0)
+            if (v->fcm == PROGRESSIVE)
                 block[v->zz_8x8[0][i++]] = value;
             else {
-                if (use_pred && (v->fcm == 1)) {
+                if (use_pred && (v->fcm == ILACE_FRAME)) {
                     if (!dc_pred_dir) // top
                         block[v->zz_8x8[2][i++]] = value;
                     else // left
@@ -3293,7 +3294,7 @@ static int vc1_decode_p_block(VC1Context *v, DCTELEM block[64], int n,
             i += skip;
             if (i > 63)
                 break;
-            if (!v->interlace)
+            if (!v->fcm)
                 idx = v->zz_8x8[0][i++];
             else
                 idx = v->zzi_8x8[i++];
@@ -3321,7 +3322,7 @@ static int vc1_decode_p_block(VC1Context *v, DCTELEM block[64], int n,
                 i += skip;
                 if (i > 15)
                     break;
-                if (!v->interlace)
+                if (!v->fcm)
                     idx = ff_vc1_simple_progressive_4x4_zz[i++];
                 else
                     idx = ff_vc1_adv_interlaced_4x4_zz[i++];
@@ -3348,7 +3349,7 @@ static int vc1_decode_p_block(VC1Context *v, DCTELEM block[64], int n,
                 i += skip;
                 if (i > 31)
                     break;
-                if (!v->interlace)
+                if (!v->fcm)
                     idx = v->zz_8x4[i++] + off;
                 else
                     idx = ff_vc1_adv_interlaced_8x4_zz[i++] + off;
@@ -3375,7 +3376,7 @@ static int vc1_decode_p_block(VC1Context *v, DCTELEM block[64], int n,
                 i += skip;
                 if (i > 31)
                     break;
-                if (!v->interlace)
+                if (!v->fcm)
                     idx = v->zz_4x8[i++] + off;
                 else
                     idx = ff_vc1_adv_interlaced_4x8_zz[i++] + off;
@@ -4739,12 +4740,12 @@ static void vc1_decode_p_blocks(VC1Context *v)
         for (; s->mb_x < s->mb_width; s->mb_x++) {
             ff_update_block_index(s);
 
-            if (v->fcm == 2)
+            if (v->fcm == ILACE_FIELD)
                 vc1_decode_p_mb_intfi(v);
-            else if (v->fcm == 1)
+            else if (v->fcm == ILACE_FRAME)
                 vc1_decode_p_mb_intfr(v);
             else vc1_decode_p_mb(v);
-            if (s->mb_y != s->start_mb_y && apply_loop_filter && v->fcm == 0)
+            if (s->mb_y != s->start_mb_y && apply_loop_filter && v->fcm == PROGRESSIVE)
                 vc1_apply_p_loop_filter(v);
             if (get_bits_count(&s->gb) > v->bits || get_bits_count(&s->gb) < 0) {
                 // TODO: may need modification to handle slice coding
@@ -4811,13 +4812,13 @@ static void vc1_decode_b_blocks(VC1Context *v)
         for (; s->mb_x < s->mb_width; s->mb_x++) {
             ff_update_block_index(s);
 
-            if (v->fcm == 2)
+            if (v->fcm == ILACE_FIELD)
                 vc1_decode_b_mb_intfi(v);
             else
                 vc1_decode_b_mb(v);
             if (get_bits_count(&s->gb) > v->bits || get_bits_count(&s->gb) < 0) {
                 // TODO: may need modification to handle slice coding
-                ff_er_add_slice(s, 0, s->start_mb_y, s->mb_x, s->mb_y, (AC_END|DC_END|MV_END));
+                ff_er_add_slice(s, 0, s->start_mb_y, s->mb_x, s->mb_y, (AC_ERROR|DC_ERROR|MV_ERROR));
                 av_log(s->avctx, AV_LOG_ERROR, "Bits overconsumption: %i > %i at %ix%i\n",
                        get_bits_count(&s->gb), v->bits, s->mb_x, s->mb_y);
                 return;
@@ -5719,6 +5720,8 @@ static int vc1_decode_frame(AVCodecContext *avctx, void *data,
 //av_log(s->avctx, AV_LOG_INFO, "Consumed %i/%i bits\n", get_bits_count(&s->gb), s->gb.size_in_bits);
 //  if (get_bits_count(&s->gb) > buf_size * 8)
 //      return -1;
+        if(s->error_occurred && s->pict_type == AV_PICTURE_TYPE_B)
+            goto err;
         ff_er_frame_end(s);
     }
 

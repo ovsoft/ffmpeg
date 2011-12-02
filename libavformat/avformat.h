@@ -700,6 +700,9 @@ typedef struct AVStream {
      */
     int stream_identifier;
 
+    int64_t interleaver_chunk_size;
+    int64_t interleaver_chunk_duration;
+
     /**
      * Stream informations used internally by av_find_stream_info()
      */
@@ -1078,6 +1081,29 @@ typedef struct AVFormatContext {
      */
     int ts_id;
 
+    /**
+     * Audio preload in microseconds.
+     * Note, not all formats support this and unpredictable things may happen if it is used when not supported.
+     * - encoding: Set by user via AVOptions (NO direct access)
+     * - decoding: unused
+     */
+    int audio_preload;
+
+    /**
+     * Max chunk time in microseconds.
+     * Note, not all formats support this and unpredictable things may happen if it is used when not supported.
+     * - encoding: Set by user via AVOptions (NO direct access)
+     * - decoding: unused
+     */
+    int max_chunk_duration;
+
+    /**
+     * Max chunk size in bytes
+     * Note, not all formats support this and unpredictable things may happen if it is used when not supported.
+     * - encoding: Set by user via AVOptions (NO direct access)
+     * - decoding: unused
+     */
+    int max_chunk_size;
 
     /*****************************************************************
      * All fields below this line are not part of the public API. They
@@ -1632,18 +1658,14 @@ AVStream *avformat_new_stream(AVFormatContext *s, AVCodec *c);
 
 AVProgram *av_new_program(AVFormatContext *s, int id);
 
+#if FF_API_SET_PTS_INFO
 /**
- * Set the pts for a given stream. If the new values would be invalid
- * (<= 0), it leaves the AVStream unchanged.
- *
- * @param s stream
- * @param pts_wrap_bits number of bits effectively used by the pts
- *        (used for wrap control, 33 is the value for MPEG)
- * @param pts_num numerator to convert to seconds (MPEG: 1)
- * @param pts_den denominator to convert to seconds (MPEG: 90000)
+ * @deprecated this function is not supposed to be called outside of lavf
  */
+attribute_deprecated
 void av_set_pts_info(AVStream *s, int pts_wrap_bits,
                      unsigned int pts_num, unsigned int pts_den);
+#endif
 
 #define AVSEEK_FLAG_BACKWARD 1 ///< seek backward
 #define AVSEEK_FLAG_BYTE     2 ///< seeking based on position in bytes

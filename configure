@@ -165,10 +165,11 @@ Configuration options:
 External library support:
   --enable-avisynth        enable reading of AVISynth script files [no]
   --enable-bzlib           enable bzlib [autodetect]
-  --enable-libcelt         enable CELT decoding via libcelt [no]
   --enable-frei0r          enable frei0r video filtering
-  --enable-libaacplus      enable AAC+ encoding via libaacplus [no]
   --enable-gnutls          enable gnutls [no]
+  --enable-libaacplus      enable AAC+ encoding via libaacplus [no]
+  --enable-libass          enable libass subtitles rendering [no]
+  --enable-libcelt         enable CELT decoding via libcelt [no]
   --enable-libopencore-amrnb enable AMR-NB de/encoding via libopencore-amrnb [no]
   --enable-libopencore-amrwb enable AMR-WB decoding via libopencore-amrwb [no]
   --enable-libopencv       enable video filtering via libopencv [no]
@@ -1008,6 +1009,7 @@ CONFIG_LIST="
     hardcoded_tables
     huffman
     libaacplus
+    libass
     libcdio
     libcelt
     libdc1394
@@ -1533,6 +1535,7 @@ libvorbis_encoder_deps="libvorbis"
 libvpx_decoder_deps="libvpx"
 libvpx_encoder_deps="libvpx"
 libx264_encoder_deps="libx264"
+libx264rgb_encoder_deps="libx264"
 libxavs_encoder_deps="libxavs"
 libxvid_encoder_deps="libxvid"
 libutvideo_decoder_deps="libutvideo gpl"
@@ -1613,6 +1616,7 @@ udp_protocol_deps="network"
 
 # filters
 amovie_filter_deps="avcodec avformat"
+ass_filter_deps="libass"
 blackframe_filter_deps="gpl"
 boxblur_filter_deps="gpl"
 cropdetect_filter_deps="gpl"
@@ -2998,7 +3002,7 @@ disabled bzlib || check_lib2 bzlib.h BZ2_bzlibVersion -lbz2 || disable bzlib
 if ! disabled vda; then
     if check_header VideoDecodeAcceleration/VDADecoder.h; then
         enable vda
-        add_ldflags -framework CoreFoundation -framework VideoDecodeAcceleration -framework QuartzCore
+        add_extralibs -framework CoreFoundation -framework VideoDecodeAcceleration -framework QuartzCore
     fi
 fi
 
@@ -3053,11 +3057,12 @@ check_mathfunc truncf
 
 # these are off by default, so fail if requested and not available
 enabled avisynth   && require2 vfw32 "windows.h vfw.h" AVIFileInit -lavifil32
-enabled libcelt    && require libcelt celt/celt.h celt_decode -lcelt0
 enabled frei0r     && { check_header frei0r.h || die "ERROR: frei0r.h header not found"; }
-enabled libaacplus && require  "libaacplus >= 2.0.0" aacplus.h aacplusEncOpen -laacplus
-enabled libdc1394  && require_pkg_config libdc1394-2 dc1394/dc1394.h dc1394_new
 enabled gnutls     && require_pkg_config gnutls gnutls/gnutls.h gnutls_global_init
+enabled libaacplus && require  "libaacplus >= 2.0.0" aacplus.h aacplusEncOpen -laacplus
+enabled libass     && require_pkg_config libass ass/ass.h ass_library_init
+enabled libcelt    && require libcelt celt/celt.h celt_decode -lcelt0
+enabled libdc1394  && require_pkg_config libdc1394-2 dc1394/dc1394.h dc1394_new
 enabled libdirac   && require_pkg_config dirac                          \
     "libdirac_decoder/dirac_parser.h libdirac_encoder/dirac_encoder.h"  \
     "dirac_decoder_init dirac_encoder_init"
@@ -3391,14 +3396,15 @@ echo "libdxva2 enabled          ${dxva2-no}"
 echo "libva enabled             ${vaapi-no}"
 echo "libvdpau enabled          ${vdpau-no}"
 echo "AVISynth enabled          ${avisynth-no}"
-echo "libcelt enabled           ${libcelt-no}"
 echo "frei0r enabled            ${frei0r-no}"
 echo "gnutls enabled            ${gnutls-no}"
+echo "libaacplus enabled        ${libaacplus-no}"
+echo "libass enabled            ${libass-no}"
 echo "libcdio support           ${libcdio-no}"
+echo "libcelt enabled           ${libcelt-no}"
 echo "libdc1394 support         ${libdc1394-no}"
 echo "libdirac enabled          ${libdirac-no}"
 echo "libfaac enabled           ${libfaac-no}"
-echo "libaacplus enabled        ${libaacplus-no}"
 echo "libgsm enabled            ${libgsm-no}"
 echo "libmodplug enabled        ${libmodplug-no}"
 echo "libmp3lame enabled        ${libmp3lame-no}"

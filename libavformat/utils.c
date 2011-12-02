@@ -869,7 +869,10 @@ static void compute_frame_duration(int *pnum, int *pden, AVStream *st,
     *pden = 0;
     switch(st->codec->codec_type) {
     case AVMEDIA_TYPE_VIDEO:
-        if(st->time_base.num*1000LL > st->time_base.den){
+        if (st->r_frame_rate.num && !pc) {
+            *pnum = st->r_frame_rate.den;
+            *pden = st->r_frame_rate.num;
+        } else if(st->time_base.num*1000LL > st->time_base.den) {
             *pnum = st->time_base.num;
             *pden = st->time_base.den;
         }else if(st->codec->time_base.num*1000LL > st->codec->time_base.den){
@@ -2851,7 +2854,7 @@ AVStream *avformat_new_stream(AVFormatContext *s, AVCodec *c)
     st->probe_packets = MAX_PROBE_PACKETS;
 
     /* default pts setting is MPEG-like */
-    av_set_pts_info(st, 33, 1, 90000);
+    avpriv_set_pts_info(st, 33, 1, 90000);
     st->last_IP_pts = AV_NOPTS_VALUE;
     for(i=0; i<MAX_REORDER_DELAY+1; i++)
         st->pts_buffer[i]= AV_NOPTS_VALUE;
@@ -3260,10 +3263,14 @@ int av_write_frame(AVFormatContext *s, AVPacket *pkt)
     return ret;
 }
 
+#define CHUNK_START 0x1000
+
 int ff_interleave_add_packet(AVFormatContext *s, AVPacket *pkt,
                               int (*compare)(AVFormatContext *, AVPacket *, AVPacket *))
 {
     AVPacketList **next_point, *this_pktl;
+    AVStream *st= s->streams[pkt->stream_index];
+    int chunked= s->max_chunk_size || s->max_chunk_duration;
 
     this_pktl = av_mallocz(sizeof(AVPacketList));
     if (!this_pktl)
@@ -3273,16 +3280,34 @@ int ff_interleave_add_packet(AVFormatContext *s, AVPacket *pkt,
     av_dup_packet(&this_pktl->pkt);  // duplicate the packet if it uses non-alloced memory
 
     if(s->streams[pkt->stream_index]->last_in_packet_buffer){
-        next_point = &(s->streams[pkt->stream_index]->last_in_packet_buffer->next);
-    }else
+        next_point = &(st->last_in_packet_buffer->next);
+    }else{
         next_point = &s->packet_buffer;
+    }
 
     if(*next_point){
+        if(chunked){
+            uint64_t max= av_rescale_q(s->max_chunk_duration, AV_TIME_BASE_Q, st->time_base);
+            if(   st->interleaver_chunk_size     + pkt->size     <= s->max_chunk_size-1U
+               && st->interleaver_chunk_duration + pkt->duration <= max-1U){
+                st->interleaver_chunk_size     += pkt->size;
+                st->interleaver_chunk_duration += pkt->duration;
+                goto next_non_null;
+            }else{
+                st->interleaver_chunk_size     =
+                st->interleaver_chunk_duration = 0;
+                this_pktl->pkt.flags |= CHUNK_START;
+            }
+        }
+
         if(compare(s, &s->packet_buffer_end->pkt, pkt)){
-            while(!compare(s, &(*next_point)->pkt, pkt)){
+            while(   *next_point
+                  && ((chunked && !((*next_point)->pkt.flags&CHUNK_START))
+                      || !compare(s, &(*next_point)->pkt, pkt))){
                 next_point= &(*next_point)->next;
             }
-            goto next_non_null;
+            if(*next_point)
+                goto next_non_null;
         }else{
             next_point = &(s->packet_buffer_end->next);
         }
@@ -3305,6 +3330,16 @@ static int ff_interleave_compare_dts(AVFormatContext *s, AVPacket *next, AVPacke
     AVStream *st2= s->streams[ next->stream_index];
     int comp = av_compare_ts(next->dts, st2->time_base, pkt->dts,
                              st->time_base);
+    if(s->audio_preload && ((st->codec->codec_type == AVMEDIA_TYPE_AUDIO) != (st2->codec->codec_type == AVMEDIA_TYPE_AUDIO))){
+        int64_t ts = av_rescale_q(pkt ->dts, st ->time_base, AV_TIME_BASE_Q) - s->audio_preload*(st ->codec->codec_type == AVMEDIA_TYPE_AUDIO);
+        int64_t ts2= av_rescale_q(next->dts, st2->time_base, AV_TIME_BASE_Q) - s->audio_preload*(st2->codec->codec_type == AVMEDIA_TYPE_AUDIO);
+        if(ts == ts2){
+            ts= ( pkt ->dts* st->time_base.num*AV_TIME_BASE - s->audio_preload*(int64_t)(st ->codec->codec_type == AVMEDIA_TYPE_AUDIO)* st->time_base.den)*st2->time_base.den
+               -( next->dts*st2->time_base.num*AV_TIME_BASE - s->audio_preload*(int64_t)(st2->codec->codec_type == AVMEDIA_TYPE_AUDIO)*st2->time_base.den)* st->time_base.den;
+            ts2=0;
+        }
+        comp= (ts>ts2) - (ts<ts2);
+    }
 
     if (comp == 0)
         return pkt->stream_index < next->stream_index;
@@ -3964,8 +3999,16 @@ int ff_hex_to_data(uint8_t *data, const char *p)
     return len;
 }
 
+#if FF_API_SET_PTS_INFO
 void av_set_pts_info(AVStream *s, int pts_wrap_bits,
                      unsigned int pts_num, unsigned int pts_den)
+{
+    avpriv_set_pts_info(s, pts_wrap_bits, pts_num, pts_den);
+}
+#endif
+
+void avpriv_set_pts_info(AVStream *s, int pts_wrap_bits,
+                         unsigned int pts_num, unsigned int pts_den)
 {
     AVRational new_tb;
     if(av_reduce(&new_tb.num, &new_tb.den, pts_num, pts_den, INT_MAX)){

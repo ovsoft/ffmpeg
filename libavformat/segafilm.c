@@ -29,6 +29,7 @@
 
 #include "libavutil/intreadwrite.h"
 #include "avformat.h"
+#include "internal.h"
 
 #define FILM_TAG MKBETAG('F', 'I', 'L', 'M')
 #define FDSC_TAG MKBETAG('F', 'D', 'S', 'C')
@@ -172,6 +173,7 @@ static int film_read_header(AVFormatContext *s,
         if (film->audio_type == CODEC_ID_ADPCM_ADX) {
             st->codec->bits_per_coded_sample = 18 * 8 / 32;
             st->codec->block_align = st->codec->channels * 18;
+            st->need_parsing = AVSTREAM_PARSE_FULL;
         } else {
             st->codec->bits_per_coded_sample = film->audio_bits;
             st->codec->block_align = st->codec->channels *
@@ -196,7 +198,7 @@ static int film_read_header(AVFormatContext *s,
         return AVERROR(ENOMEM);
 
     for(i=0; i<s->nb_streams; i++)
-        av_set_pts_info(s->streams[i], 33, 1, film->base_clock);
+        avpriv_set_pts_info(s->streams[i], 33, 1, film->base_clock);
 
     audio_frame_counter = 0;
     for (i = 0; i < film->sample_count; i++) {

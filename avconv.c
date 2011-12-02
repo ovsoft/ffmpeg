@@ -129,7 +129,7 @@ static int video_sync_method= -1;
 static int audio_sync_method= 0;
 static float audio_drift_threshold= 0.1;
 static int copy_ts= 0;
-static int copy_tb= 0;
+static int copy_tb = 1;
 static int opt_shortest = 0;
 static char *vstats_filename;
 static FILE *vstats_file;
@@ -779,6 +779,14 @@ static void write_frame(AVFormatContext *s, AVPacket *pkt, AVCodecContext *avctx
     }
 }
 
+static void generate_silence(uint8_t* buf, enum AVSampleFormat sample_fmt, size_t size)
+{
+    int fill_char = 0x00;
+    if (sample_fmt == AV_SAMPLE_FMT_U8)
+        fill_char = 0x80;
+    memset(buf, fill_char, size);
+}
+
 static void do_audio_out(AVFormatContext *s,
                          OutputStream *ost,
                          InputStream *ist,
@@ -879,9 +887,9 @@ need_realloc:
 
     if(audio_sync_method){
         double delta = get_sync_ipts(ost) * enc->sample_rate - ost->sync_opts
-                - av_fifo_size(ost->fifo)/(enc->channels * 2);
-        double idelta= delta*dec->sample_rate / enc->sample_rate;
-        int byte_delta= ((int)idelta)*2*dec->channels;
+                - av_fifo_size(ost->fifo)/(enc->channels * osize);
+        int idelta = delta * dec->sample_rate / enc->sample_rate;
+        int byte_delta = idelta * isize * dec->channels;
 
         //FIXME resample delay
         if(fabs(delta) > 50){
@@ -890,7 +898,8 @@ need_realloc:
                     byte_delta= FFMAX(byte_delta, -size);
                     size += byte_delta;
                     buf  -= byte_delta;
-                    av_log(NULL, AV_LOG_VERBOSE, "discarding %d audio samples\n", (int)-delta);
+                    av_log(NULL, AV_LOG_VERBOSE, "discarding %d audio samples\n",
+                           -byte_delta / (isize * dec->channels));
                     if(!size)
                         return;
                     ist->is_start=0;
@@ -904,11 +913,11 @@ need_realloc:
                     }
                     ist->is_start=0;
 
-                    memset(input_tmp, 0, byte_delta);
+                    generate_silence(input_tmp, dec->sample_fmt, byte_delta);
                     memcpy(input_tmp + byte_delta, buf, size);
                     buf= input_tmp;
                     size += byte_delta;
-                    av_log(NULL, AV_LOG_VERBOSE, "adding %d audio samples of silence\n", (int)delta);
+                    av_log(NULL, AV_LOG_VERBOSE, "adding %d audio samples of silence\n", idelta);
                 }
             }else if(audio_sync_method>1){
                 int comp= av_clip(delta, -audio_sync_method, audio_sync_method);
@@ -921,7 +930,7 @@ need_realloc:
         }
     }else
         ost->sync_opts= lrintf(get_sync_ipts(ost) * enc->sample_rate)
-                        - av_fifo_size(ost->fifo)/(enc->channels * 2); //FIXME wrong
+                        - av_fifo_size(ost->fifo)/(enc->channels * osize); //FIXME wrong
 
     if (ost->audio_resample) {
         buftmp = audio_buf;
@@ -1505,14 +1514,6 @@ static void print_report(OutputFile *output_files,
     }
 }
 
-static void generate_silence(uint8_t* buf, enum AVSampleFormat sample_fmt, size_t size)
-{
-    int fill_char = 0x00;
-    if (sample_fmt == AV_SAMPLE_FMT_U8)
-        fill_char = 0x80;
-    memset(buf, fill_char, size);
-}
-
 static void flush_encoders(OutputStream *ost_table, int nb_ostreams)
 {
     int i, ret;
@@ -1822,7 +1823,9 @@ static int transcode_video(InputStream *ist, AVPacket *pkt, int *got_output, int
         return ret;
     }
     ist->next_pts = ist->pts = decoded_frame->best_effort_timestamp;
-    if (ist->st->codec->time_base.num != 0) {
+    if (pkt->duration)
+        ist->next_pts += av_rescale_q(pkt->duration, ist->st->time_base, AV_TIME_BASE_Q);
+    else if (ist->st->codec->time_base.num != 0) {
         int ticks      = ist->st->parser ? ist->st->parser->repeat_pict + 1 :
                                            ist->st->codec->ticks_per_frame;
         ist->next_pts += ((int64_t)AV_TIME_BASE *
@@ -1985,6 +1988,7 @@ static int output_packet(InputStream *ist,
     /* handle stream copy */
     if (!ist->decoding_needed) {
         rate_emu_sleep(ist);
+        ist->pts = ist->next_pts;
         switch (ist->st->codec->codec_type) {
         case AVMEDIA_TYPE_AUDIO:
             ist->next_pts += ((int64_t)AV_TIME_BASE * ist->st->codec->frame_size) /
@@ -2131,25 +2135,15 @@ static int transcode_init(OutputFile *output_files,
                 return AVERROR(ENOMEM);
             }
             memcpy(codec->extradata, icodec->extradata, icodec->extradata_size);
-            codec->extradata_size= icodec->extradata_size;
 
-            codec->time_base = ist->st->time_base;
-            if(!strcmp(oc->oformat->name, "avi")) {
-                if (!copy_tb &&
-                    av_q2d(icodec->time_base)*icodec->ticks_per_frame > 2*av_q2d(ist->st->time_base) &&
-                    av_q2d(ist->st->time_base) < 1.0/500){
-                    codec->time_base = icodec->time_base;
-                    codec->time_base.num *= icodec->ticks_per_frame;
-                    codec->time_base.den *= 2;
-                }
-            } else if(!(oc->oformat->flags & AVFMT_VARIABLE_FPS)) {
-                if(!copy_tb && av_q2d(icodec->time_base)*icodec->ticks_per_frame > av_q2d(ist->st->time_base) && av_q2d(ist->st->time_base) < 1.0/500){
-                    codec->time_base = icodec->time_base;
-                    codec->time_base.num *= icodec->ticks_per_frame;
-                }
-            }
-            av_reduce(&codec->time_base.num, &codec->time_base.den,
-                        codec->time_base.num, codec->time_base.den, INT_MAX);
+            codec->extradata_size = icodec->extradata_size;
+            if (!copy_tb) {
+                codec->time_base      = icodec->time_base;
+                codec->time_base.num *= icodec->ticks_per_frame;
+                av_reduce(&codec->time_base.num, &codec->time_base.den,
+                          codec->time_base.num, codec->time_base.den, INT_MAX);
+            } else
+                codec->time_base = ist->st->time_base;
 
             switch(codec->codec_type) {
             case AVMEDIA_TYPE_AUDIO:
@@ -2963,7 +2957,7 @@ static void add_input_streams(OptionsContext *o, AVFormatContext *ic)
         ist->st = st;
         ist->file_index = nb_input_files;
         ist->discard = 1;
-        ist->opts = filter_codec_opts(codec_opts, ist->st->codec->codec_id, ic, st);
+        ist->opts = filter_codec_opts(codec_opts, choose_decoder(o, ic, st), ic, st);
 
         ist->ts_scale = 1.0;
         MATCH_PER_STREAM_OPT(ts_scale, dbl, ist->ts_scale, ic, st);
@@ -3302,7 +3296,7 @@ static OutputStream *new_output_stream(OptionsContext *o, AVFormatContext *oc, e
     st->codec->codec_type = type;
     choose_encoder(o, oc, ost);
     if (ost->enc) {
-        ost->opts  = filter_codec_opts(codec_opts, ost->enc->id, oc, st);
+        ost->opts  = filter_codec_opts(codec_opts, ost->enc, oc, st);
     }
 
     avcodec_get_context_defaults3(st->codec, ost->enc);

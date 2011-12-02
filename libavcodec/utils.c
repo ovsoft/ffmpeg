@@ -203,6 +203,10 @@ void avcodec_align_dimensions2(AVCodecContext *s, int *width, int *height, int l
         break;
     }
 
+    if(s->codec_id == CODEC_ID_IFF_ILBM || s->codec_id == CODEC_ID_IFF_BYTERUN1){
+        w_align= FFMAX(w_align, 8);
+    }
+
     *width = FFALIGN(*width , w_align);
     *height= FFALIGN(*height, h_align);
     if(s->codec_id == CODEC_ID_H264 || s->lowres)
@@ -575,10 +579,13 @@ int attribute_align_arg avcodec_open2(AVCodecContext *avctx, AVCodec *codec, AVD
     if ((ret = av_opt_set_dict(avctx, &tmp)) < 0)
         goto free_and_end;
 
+    //We only call avcodec_set_dimensions() for non h264 codecs so as not to overwrite previously setup dimensions
+    if(!( avctx->coded_width && avctx->coded_height && avctx->width && avctx->height && avctx->codec_id == CODEC_ID_H264)){
     if(avctx->coded_width && avctx->coded_height)
         avcodec_set_dimensions(avctx, avctx->coded_width, avctx->coded_height);
     else if(avctx->width && avctx->height)
         avcodec_set_dimensions(avctx, avctx->width, avctx->height);
+    }
 
     if ((avctx->coded_width || avctx->coded_height || avctx->width || avctx->height)
         && (  av_image_check_size(avctx->coded_width, avctx->coded_height, 0, avctx) < 0
@@ -861,14 +868,14 @@ int attribute_align_arg avcodec_decode_audio3(AVCodecContext *avctx, int16_t *sa
 {
     int ret;
 
-    avctx->pkt = avpkt;
-
     if (!avpkt->data && avpkt->size) {
         av_log(avctx, AV_LOG_ERROR, "invalid packet: NULL data, size != 0\n");
         return AVERROR(EINVAL);
     }
 
     if((avctx->codec->capabilities & CODEC_CAP_DELAY) || avpkt->size){
+        av_packet_split_side_data(avpkt);
+        avctx->pkt = avpkt;
         //FIXME remove the check below _after_ ensuring that all audio check that the available space is enough
         if(*frame_size_ptr < AVCODEC_MAX_AUDIO_FRAME_SIZE){
             av_log(avctx, AV_LOG_ERROR, "buffer smaller than AVCODEC_MAX_AUDIO_FRAME_SIZE\n");
