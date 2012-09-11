@@ -68,6 +68,7 @@ ELF     .size   \name, . - \name
         .purgem endfunc
     .endm
         .text
+        .align          2
     .if \export
         .global EXTERN_ASM\name
 EXTERN_ASM\name:
@@ -86,6 +87,13 @@ ELF     .size   \name, . - \name
         .align          \align
 \name:
 .endm
+
+#if !HAVE_ARMV6T2
+.macro  movw    rd, val
+        mov     \rd, \val &  255
+        orr     \rd, \val & ~255
+.endm
+#endif
 
 .macro  mov32   rd, val
 #if HAVE_ARMV6T2
@@ -113,7 +121,13 @@ T       add             \rn, \rn, \rm
 T       ldr             \rt, [\rn]
 .endm
 
-.macro  ldr_dpren       rt,  rn,  rm:vararg
+.macro  ldr_dpre        rt,  rn,  rm:vararg
+A       ldr             \rt, [\rn, -\rm]!
+T       sub             \rn, \rn, \rm
+T       ldr             \rt, [\rn]
+.endm
+
+.macro  ldr_nreg        rt,  rn,  rm:vararg
 A       ldr             \rt, [\rn, -\rm]
 T       sub             \rt, \rn, \rm
 T       ldr             \rt, [\rt]

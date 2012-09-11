@@ -1,5 +1,5 @@
 /*
- * Micrsoft RLE Video Decoder
+ * Microsoft RLE video decoder
  * Copyright (C) 2003 the ffmpeg project
  *
  * This file is part of FFmpeg.
@@ -21,7 +21,7 @@
 
 /**
  * @file
- * MS RLE Video Decoder by Mike Melanson (melanson@pcisys.net)
+ * MS RLE video decoder by Mike Melanson (melanson@pcisys.net)
  * For more information about the MS RLE format, visit:
  *   http://www.pcisys.net/~melanson/codecs/
  *
@@ -40,6 +40,7 @@ typedef struct MsrleContext {
     AVCodecContext *avctx;
     AVFrame frame;
 
+    GetByteContext gb;
     const unsigned char *buf;
     int size;
 
@@ -127,7 +128,8 @@ static int msrle_decode_frame(AVCodecContext *avctx,
             ptr += s->frame.linesize[0];
         }
     } else {
-        ff_msrle_decode(avctx, (AVPicture*)&s->frame, avctx->bits_per_coded_sample, buf, buf_size);
+        bytestream2_init(&s->gb, buf, buf_size);
+        ff_msrle_decode(avctx, (AVPicture*)&s->frame, avctx->bits_per_coded_sample, &s->gb);
     }
 
     *data_size = sizeof(AVFrame);
@@ -157,5 +159,5 @@ AVCodec ff_msrle_decoder = {
     .close          = msrle_decode_end,
     .decode         = msrle_decode_frame,
     .capabilities   = CODEC_CAP_DR1,
-    .long_name= NULL_IF_CONFIG_SMALL("Microsoft RLE"),
+    .long_name      = NULL_IF_CONFIG_SMALL("Microsoft RLE"),
 };

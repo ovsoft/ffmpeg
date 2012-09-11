@@ -21,6 +21,7 @@
 
 #include "libavutil/intreadwrite.h"
 #include "avformat.h"
+#include "internal.h"
 
 typedef struct {
     int cur_stream;
@@ -38,7 +39,7 @@ static int pmp_probe(AVProbeData *p) {
     return 0;
 }
 
-static int pmp_header(AVFormatContext *s, AVFormatParameters *ap)
+static int pmp_header(AVFormatContext *s)
 {
     PMPContext *pmp = s->priv_data;
     AVIOContext *pb = s->pb;
@@ -70,7 +71,7 @@ static int pmp_header(AVFormatContext *s, AVFormatParameters *ap)
 
     tb_num = avio_rl32(pb);
     tb_den = avio_rl32(pb);
-    av_set_pts_info(vst, 32, tb_num, tb_den);
+    avpriv_set_pts_info(vst, 32, tb_num, tb_den);
     vst->nb_frames = index_cnt;
     vst->duration = index_cnt;
 
@@ -98,7 +99,7 @@ static int pmp_header(AVFormatContext *s, AVFormatParameters *ap)
         ast->codec->codec_id = audio_codec_id;
         ast->codec->channels = channels;
         ast->codec->sample_rate = srate;
-        av_set_pts_info(ast, 32, 1, srate);
+        avpriv_set_pts_info(ast, 32, 1, srate);
     }
     pos = avio_tell(pb) + 4*index_cnt;
     for (i = 0; i < index_cnt; i++) {
@@ -123,6 +124,10 @@ static int pmp_packet(AVFormatContext *s, AVPacket *pkt)
     if (pmp->cur_stream == 0) {
         int num_packets;
         pmp->audio_packets = avio_r8(pb);
+        if (!pmp->audio_packets) {
+            av_log_ask_for_sample(s, "0 audio packets\n");
+            return AVERROR_PATCHWELCOME;
+        }
         num_packets = (pmp->num_streams - 1) * pmp->audio_packets + 1;
         avio_skip(pb, 8);
         pmp->current_packet = 0;

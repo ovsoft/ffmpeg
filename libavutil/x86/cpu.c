@@ -74,12 +74,17 @@ int ff_get_cpu_flags_x86(void)
         return 0; /* CPUID not supported */
 #endif
 
-    cpuid(0, max_std_level, vendor.i[0], vendor.i[2], vendor.i[1]);
+    cpuid(0, max_std_level, ebx, ecx, edx);
+    vendor.i[0] = ebx;
+    vendor.i[1] = edx;
+    vendor.i[2] = ecx;
 
     if(max_std_level >= 1){
         cpuid(1, eax, ebx, ecx, std_caps);
         family = ((eax>>8)&0xf) + ((eax>>20)&0xff);
         model  = ((eax>>4)&0xf) + ((eax>>12)&0xf0);
+        if (std_caps & (1<<15))
+            rval |= AV_CPU_FLAG_CMOV;
         if (std_caps & (1<<23))
             rval |= AV_CPU_FLAG_MMX;
         if (std_caps & (1<<25))

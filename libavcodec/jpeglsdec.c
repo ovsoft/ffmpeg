@@ -51,10 +51,9 @@
  */
 int ff_jpegls_decode_lse(MJpegDecodeContext *s)
 {
-    int len, id;
+    int id;
 
-    /* XXX: verify len field validity */
-    len = get_bits(&s->gb, 16);
+    skip_bits(&s->gb, 16);  /* length: FIXME: verify field validity */
     id = get_bits(&s->gb, 8);
 
     switch(id){
@@ -198,6 +197,9 @@ static inline void ls_decode_line(JLSState *state, MJpegDecodeContext *s, void *
             r = ff_log2_run[state->run_index[comp]];
             if(r)
                 r = get_bits_long(&s->gb, r);
+            if(x + r * stride > w) {
+                r = (w - x) / stride;
+            }
             for(i = 0; i < r; i++) {
                 W(dst, x, Ra);
                 x += stride;
@@ -262,9 +264,9 @@ int ff_jpegls_decode_picture(MJpegDecodeContext *s, int near, int point_transfor
     JLSState *state;
     int off = 0, stride = 1, width, shift;
 
-    zero = av_mallocz(s->picture_ptr->linesize[0]);
+    zero = av_mallocz(s->picture.linesize[0]);
     last = zero;
-    cur = s->picture_ptr->data[0];
+    cur = s->picture.data[0];
 
     state = av_mallocz(sizeof(JLSState));
     /* initialize JPEG-LS state from JPEG parameters */
@@ -299,7 +301,7 @@ int ff_jpegls_decode_picture(MJpegDecodeContext *s, int near, int point_transfor
                 t = *((uint16_t*)last);
             }
             last = cur;
-            cur += s->picture_ptr->linesize[0];
+            cur += s->picture.linesize[0];
 
             if (s->restart_interval && !--s->restart_count) {
                 align_get_bits(&s->gb);
@@ -309,11 +311,12 @@ int ff_jpegls_decode_picture(MJpegDecodeContext *s, int near, int point_transfor
     } else if(ilv == 1) { /* line interleaving */
         int j;
         int Rc[3] = {0, 0, 0};
-        memset(cur, 0, s->picture_ptr->linesize[0]);
-        width = s->width * 3;
+        stride = (s->nb_components > 1) ? 3 : 1;
+        memset(cur, 0, s->picture.linesize[0]);
+        width = s->width * stride;
         for(i = 0; i < s->height; i++) {
-            for(j = 0; j < 3; j++) {
-                ls_decode_line(state, s, last + j, cur + j, Rc[j], width, 3, j, 8);
+            for(j = 0; j < stride; j++) {
+                ls_decode_line(state, s, last + j, cur + j, Rc[j], width, stride, j, 8);
                 Rc[j] = last[j];
 
                 if (s->restart_interval && !--s->restart_count) {
@@ -322,7 +325,7 @@ int ff_jpegls_decode_picture(MJpegDecodeContext *s, int near, int point_transfor
                 }
             }
             last = cur;
-            cur += s->picture_ptr->linesize[0];
+            cur += s->picture.linesize[0];
         }
     } else if(ilv == 2) { /* sample interleaving */
         av_log(s->avctx, AV_LOG_ERROR, "Sample interleaved images are not supported.\n");
@@ -337,22 +340,22 @@ int ff_jpegls_decode_picture(MJpegDecodeContext *s, int near, int point_transfor
         w = s->width * s->nb_components;
 
         if(s->bits <= 8){
-            uint8_t *src = s->picture_ptr->data[0];
+            uint8_t *src = s->picture.data[0];
 
             for(i = 0; i < s->height; i++){
                 for(x = off; x < w; x+= stride){
                     src[x] <<= shift;
                 }
-                src += s->picture_ptr->linesize[0];
+                src += s->picture.linesize[0];
             }
         }else{
-            uint16_t *src = (uint16_t*) s->picture_ptr->data[0];
+            uint16_t *src = (uint16_t*) s->picture.data[0];
 
             for(i = 0; i < s->height; i++){
                 for(x = 0; x < w; x++){
                     src[x] <<= shift;
                 }
-                src += s->picture_ptr->linesize[0]/2;
+                src += s->picture.linesize[0]/2;
             }
         }
     }
@@ -372,5 +375,5 @@ AVCodec ff_jpegls_decoder = {
     .close          = ff_mjpeg_decode_end,
     .decode         = ff_mjpeg_decode_frame,
     .capabilities   = CODEC_CAP_DR1,
-    .long_name = NULL_IF_CONFIG_SMALL("JPEG-LS"),
+    .long_name      = NULL_IF_CONFIG_SMALL("JPEG-LS"),
 };

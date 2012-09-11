@@ -43,7 +43,7 @@
 #undef NDEBUG
 #include <assert.h>
 
-extern const uint8_t mvtab[33][2];
+extern const uint8_t ff_mvtab[33][2];
 
 static VLC svq1_block_type;
 static VLC svq1_motion_component;
@@ -195,7 +195,8 @@ static const uint8_t string_table[256] = {
 
 #define SVQ1_CALC_CODEBOOK_ENTRIES(cbook)\
       codebook = (const uint32_t *) cbook[level];\
-      bit_cache = get_bits (bitbuf, 4*stages);\
+      if (stages > 0)\
+        bit_cache = get_bits (bitbuf, 4*stages);\
       /* calculate codebook entries for this vector */\
       for (j=0; j < stages; j++) {\
         entries[j] = (((bit_cache >> (4*(stages - j - 1))) & 0xF) + 16*j) << (level + 1);\
@@ -646,6 +647,9 @@ static int svq1_decode_frame(AVCodecContext *avctx,
   if (s->f_code != 0x20) {
     uint32_t *src = (uint32_t *) (buf + 4);
 
+    if (buf_size < 36)
+        return AVERROR_INVALIDDATA;
+
     for (i=0; i < 4; i++) {
       src[i] = ((src[i] << 16) | (src[i] >> 16)) ^ src[7 - i];
     }
@@ -669,7 +673,7 @@ static int svq1_decode_frame(AVCodecContext *avctx,
      || avctx->skip_frame >= AVDISCARD_ALL)
       return buf_size;
 
-  if(MPV_frame_start(s, avctx) < 0)
+  if(ff_MPV_frame_start(s, avctx) < 0)
       return -1;
 
   pmv = av_malloc((FFALIGN(s->width, 16)/8 + 3) * sizeof(*pmv));
@@ -705,7 +709,7 @@ static int svq1_decode_frame(AVCodecContext *avctx,
           result = svq1_decode_block_intra (&s->gb, &current[x], linesize);
           if (result != 0)
           {
-            av_log(s->avctx, AV_LOG_INFO, "Error in svq1_decode_block %i (keyframe)\n",result);
+            av_log(s->avctx, AV_LOG_ERROR, "Error in svq1_decode_block %i (keyframe)\n",result);
             goto err;
           }
         }
@@ -734,10 +738,10 @@ static int svq1_decode_frame(AVCodecContext *avctx,
     }
   }
 
-  *pict = *(AVFrame*)&s->current_picture;
+  *pict = s->current_picture.f;
 
 
-  MPV_frame_end(s);
+  ff_MPV_frame_end(s);
 
   *data_size=sizeof(AVFrame);
   result = buf_size;
@@ -752,7 +756,7 @@ static av_cold int svq1_decode_init(AVCodecContext *avctx)
     int i;
     int offset = 0;
 
-    MPV_decode_defaults(s);
+    ff_MPV_decode_defaults(s);
 
     s->avctx = avctx;
     s->width = (avctx->width+3)&~3;
@@ -761,15 +765,15 @@ static av_cold int svq1_decode_init(AVCodecContext *avctx)
     avctx->pix_fmt = PIX_FMT_YUV410P;
     avctx->has_b_frames= 1; // not true, but DP frames and these behave like unidirectional b frames
     s->flags= avctx->flags;
-    if (MPV_common_init(s) < 0) return -1;
+    if (ff_MPV_common_init(s) < 0) return -1;
 
     INIT_VLC_STATIC(&svq1_block_type, 2, 4,
         &ff_svq1_block_type_vlc[0][1], 2, 1,
         &ff_svq1_block_type_vlc[0][0], 2, 1, 6);
 
     INIT_VLC_STATIC(&svq1_motion_component, 7, 33,
-        &mvtab[0][1], 2, 1,
-        &mvtab[0][0], 2, 1, 176);
+        &ff_mvtab[0][1], 2, 1,
+        &ff_mvtab[0][0], 2, 1, 176);
 
     for (i = 0; i < 6; i++) {
         static const uint8_t sizes[2][6] = {{14, 10, 14, 18, 16, 18}, {10, 10, 14, 14, 14, 16}};
@@ -803,7 +807,7 @@ static av_cold int svq1_decode_end(AVCodecContext *avctx)
 {
     MpegEncContext *s = avctx->priv_data;
 
-    MPV_common_end(s);
+    ff_MPV_common_end(s);
     return 0;
 }
 
@@ -817,7 +821,7 @@ AVCodec ff_svq1_decoder = {
     .close          = svq1_decode_end,
     .decode         = svq1_decode_frame,
     .capabilities   = CODEC_CAP_DR1,
-    .flush= ff_mpeg_flush,
-    .pix_fmts= (const enum PixelFormat[]){PIX_FMT_YUV410P, PIX_FMT_NONE},
-    .long_name= NULL_IF_CONFIG_SMALL("Sorenson Vector Quantizer 1 / Sorenson Video 1 / SVQ1"),
+    .flush          = ff_mpeg_flush,
+    .pix_fmts       = (const enum PixelFormat[]){ PIX_FMT_YUV410P, PIX_FMT_NONE },
+    .long_name      = NULL_IF_CONFIG_SMALL("Sorenson Vector Quantizer 1 / Sorenson Video 1 / SVQ1"),
 };

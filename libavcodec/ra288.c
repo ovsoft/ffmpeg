@@ -20,7 +20,7 @@
  */
 
 #include "avcodec.h"
-#define ALT_BITSTREAM_READER_LE
+#define BITSTREAM_READER_LE
 #include "get_bits.h"
 #include "ra288.h"
 #include "lpc.h"
@@ -36,9 +36,10 @@
 #define RA288_BLOCKS_PER_FRAME 32
 
 typedef struct {
+    AVFrame frame;
     DSPContext dsp;
-    DECLARE_ALIGNED(16, float,   sp_lpc)[FFALIGN(36, 8)];   ///< LPC coefficients for speech data (spec: A)
-    DECLARE_ALIGNED(16, float, gain_lpc)[FFALIGN(10, 8)];   ///< LPC coefficients for gain        (spec: GB)
+    DECLARE_ALIGNED(32, float,   sp_lpc)[FFALIGN(36, 16)];   ///< LPC coefficients for speech data (spec: A)
+    DECLARE_ALIGNED(32, float, gain_lpc)[FFALIGN(10, 16)];   ///< LPC coefficients for gain        (spec: GB)
 
     /** speech data history                                      (spec: SB).
      *  Its first 70 coefficients are updated only at backward filtering.
@@ -61,7 +62,11 @@ static av_cold int ra288_decode_init(AVCodecContext *avctx)
 {
     RA288Context *ractx = avctx->priv_data;
     avctx->sample_fmt = AV_SAMPLE_FMT_FLT;
-    dsputil_init(&ractx->dsp, avctx);
+    ff_dsputil_init(&ractx->dsp, avctx);
+
+    avcodec_get_frame_defaults(&ractx->frame);
+    avctx->coded_frame = &ractx->frame;
+
     return 0;
 }
 
@@ -128,11 +133,11 @@ static void do_hybrid_window(RA288Context *ractx,
     int i;
     float buffer1[MAX_BACKWARD_FILTER_ORDER + 1];
     float buffer2[MAX_BACKWARD_FILTER_ORDER + 1];
-    LOCAL_ALIGNED_16(float, work, [FFALIGN(MAX_BACKWARD_FILTER_ORDER +
-                                           MAX_BACKWARD_FILTER_LEN   +
-                                           MAX_BACKWARD_FILTER_NONREC, 8)]);
+    LOCAL_ALIGNED(32, float, work, [FFALIGN(MAX_BACKWARD_FILTER_ORDER +
+                                            MAX_BACKWARD_FILTER_LEN   +
+                                            MAX_BACKWARD_FILTER_NONREC, 16)]);
 
-    ractx->dsp.vector_fmul(work, window, hist, FFALIGN(order + n + non_rec, 8));
+    ractx->dsp.vector_fmul(work, window, hist, FFALIGN(order + n + non_rec, 16));
 
     convolve(buffer1, work + order    , n      , order);
     convolve(buffer2, work + order + n, non_rec, order);
@@ -159,18 +164,18 @@ static void backward_filter(RA288Context *ractx,
     do_hybrid_window(ractx, order, n, non_rec, temp, hist, rec, window);
 
     if (!compute_lpc_coefs(temp, order, lpc, 0, 1, 1))
-        ractx->dsp.vector_fmul(lpc, lpc, tab, FFALIGN(order, 8));
+        ractx->dsp.vector_fmul(lpc, lpc, tab, FFALIGN(order, 16));
 
     memmove(hist, hist + n, move_size*sizeof(*hist));
 }
 
 static int ra288_decode_frame(AVCodecContext * avctx, void *data,
-                              int *data_size, AVPacket *avpkt)
+                              int *got_frame_ptr, AVPacket *avpkt)
 {
     const uint8_t *buf = avpkt->data;
     int buf_size = avpkt->size;
-    float *out = data;
-    int i, out_size;
+    float *out;
+    int i, ret;
     RA288Context *ractx = avctx->priv_data;
     GetBitContext gb;
 
@@ -181,12 +186,13 @@ static int ra288_decode_frame(AVCodecContext * avctx, void *data,
         return AVERROR_INVALIDDATA;
     }
 
-    out_size = RA288_BLOCK_SIZE * RA288_BLOCKS_PER_FRAME *
-               av_get_bytes_per_sample(avctx->sample_fmt);
-    if (*data_size < out_size) {
-        av_log(avctx, AV_LOG_ERROR, "Output buffer is too small\n");
-        return AVERROR(EINVAL);
+    /* get output buffer */
+    ractx->frame.nb_samples = RA288_BLOCK_SIZE * RA288_BLOCKS_PER_FRAME;
+    if ((ret = avctx->get_buffer(avctx, &ractx->frame)) < 0) {
+        av_log(avctx, AV_LOG_ERROR, "get_buffer() failed\n");
+        return ret;
     }
+    out = (float *)ractx->frame.data[0];
 
     init_get_bits(&gb, buf, avctx->block_align * 8);
 
@@ -208,7 +214,9 @@ static int ra288_decode_frame(AVCodecContext * avctx, void *data,
         }
     }
 
-    *data_size = out_size;
+    *got_frame_ptr   = 1;
+    *(AVFrame *)data = ractx->frame;
+
     return avctx->block_align;
 }
 
@@ -219,5 +227,6 @@ AVCodec ff_ra_288_decoder = {
     .priv_data_size = sizeof(RA288Context),
     .init           = ra288_decode_init,
     .decode         = ra288_decode_frame,
+    .capabilities   = CODEC_CAP_DR1,
     .long_name      = NULL_IF_CONFIG_SMALL("RealAudio 2.0 (28.8K)"),
 };

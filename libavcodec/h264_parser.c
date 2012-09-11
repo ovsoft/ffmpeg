@@ -25,6 +25,8 @@
  * @author Michael Niedermayer <michaelni@gmx.at>
  */
 
+#define UNCHECKED_BITSTREAM_READER 1
+
 #include "parser.h"
 #include "h264data.h"
 #include "golomb.h"
@@ -148,6 +150,7 @@ static inline int parse_nal_units(AVCodecParserContext *s,
     unsigned int slice_type;
     int state = -1;
     const uint8_t *ptr;
+    int q264 = buf_size >=4 && !memcmp("Q264", buf, 4);
 
     /* set some sane default values */
     s->pict_type = AV_PICTURE_TYPE_I;
@@ -163,12 +166,25 @@ static inline int parse_nal_units(AVCodecParserContext *s,
         return 0;
 
     for(;;) {
-        int src_length, dst_length, consumed;
+        int src_length, dst_length, consumed, nalsize = 0;
+        if (h->is_avc) {
+            int i;
+            if (h->nal_length_size >= buf_end - buf) break;
+            nalsize = 0;
+            for (i = 0; i < h->nal_length_size; i++)
+                nalsize = (nalsize << 8) | *buf++;
+            if (nalsize <= 0 || nalsize > buf_end - buf) {
+                av_log(h->s.avctx, AV_LOG_ERROR, "AVC: nal size %d\n", nalsize);
+                break;
+            }
+            src_length = nalsize;
+        } else {
         buf = avpriv_mpv_find_start_code(buf, buf_end, &state);
         if(buf >= buf_end)
             break;
         --buf;
         src_length = buf_end - buf;
+        }
         switch (state & 0x1f) {
         case NAL_SLICE:
         case NAL_IDR_SLICE:
@@ -264,8 +280,10 @@ static inline int parse_nal_units(AVCodecParserContext *s,
 
             return 0; /* no need to evaluate the rest */
         }
-        buf += consumed;
+        buf += h->is_avc ? nalsize : consumed;
     }
+    if (q264)
+        return 0;
     /* didn't find a picture! */
     av_log(h->s.avctx, AV_LOG_ERROR, "missing picture in access unit with size %d\n", buf_size);
     return -1;
@@ -311,7 +329,6 @@ static int h264_parse(AVCodecParserContext *s,
         }
     }
 
-    if(!h->is_avc){
     parse_nal_units(s, avctx, buf, buf_size);
 
     if (h->sei_cpb_removal_delay >= 0) {
@@ -326,7 +343,6 @@ static int h264_parse(AVCodecParserContext *s,
 
     if (s->flags & PARSER_FLAG_ONCE) {
         s->flags &= PARSER_FLAG_COMPLETE_FRAMES;
-    }
     }
 
     *poutbuf = buf;
@@ -371,6 +387,7 @@ static int init(AVCodecParserContext *s)
 {
     H264Context *h = s->priv_data;
     h->thread_context[0] = h;
+    h->s.slice_context_count = 1;
     return 0;
 }
 

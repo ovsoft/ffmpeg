@@ -30,7 +30,7 @@
  */
 
 #include "libavutil/intreadwrite.h"
-#include "libavutil/intfloat_readwrite.h"
+#include "libavutil/intfloat.h"
 #include "libavutil/dict.h"
 #include "avformat.h"
 #include "internal.h"
@@ -44,8 +44,7 @@ static int sox_probe(AVProbeData *p)
     return 0;
 }
 
-static int sox_read_header(AVFormatContext *s,
-                           AVFormatParameters *ap)
+static int sox_read_header(AVFormatContext *s)
 {
     AVIOContext *pb = s->pb;
     unsigned header_size, comment_size;
@@ -62,14 +61,14 @@ static int sox_read_header(AVFormatContext *s,
         st->codec->codec_id = CODEC_ID_PCM_S32LE;
         header_size         = avio_rl32(pb);
         avio_skip(pb, 8); /* sample count */
-        sample_rate         = av_int2dbl(avio_rl64(pb));
+        sample_rate         = av_int2double(avio_rl64(pb));
         st->codec->channels = avio_rl32(pb);
         comment_size        = avio_rl32(pb);
     } else {
         st->codec->codec_id = CODEC_ID_PCM_S32BE;
         header_size         = avio_rb32(pb);
         avio_skip(pb, 8); /* sample count */
-        sample_rate         = av_int2dbl(avio_rb64(pb));
+        sample_rate         = av_int2double(avio_rb64(pb));
         st->codec->channels = avio_rb32(pb);
         comment_size        = avio_rb32(pb);
     }
@@ -98,6 +97,8 @@ static int sox_read_header(AVFormatContext *s,
 
     if (comment_size && comment_size < UINT_MAX) {
         char *comment = av_malloc(comment_size+1);
+        if(!comment)
+            return AVERROR(ENOMEM);
         if (avio_read(pb, comment, comment_size) != comment_size) {
             av_freep(&comment);
             return AVERROR(EIO);
@@ -137,8 +138,8 @@ static int sox_read_packet(AVFormatContext *s,
     ret = av_get_packet(s->pb, pkt, size);
     if (ret < 0)
         return AVERROR(EIO);
+    pkt->flags &= ~AV_PKT_FLAG_CORRUPT;
     pkt->stream_index = 0;
-    pkt->size = ret;
 
     return 0;
 }
@@ -149,5 +150,5 @@ AVInputFormat ff_sox_demuxer = {
     .read_probe     = sox_probe,
     .read_header    = sox_read_header,
     .read_packet    = sox_read_packet,
-    .read_seek      = pcm_read_seek,
+    .read_seek      = ff_pcm_read_seek,
 };

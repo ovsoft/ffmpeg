@@ -174,6 +174,7 @@ static const ModeTab mode_44_48 = {
 
 typedef struct TwinContext {
     AVCodecContext *avctx;
+    AVFrame frame;
     DSPContext      dsp;
     FFTContext mdct_ctx[3];
 
@@ -195,6 +196,7 @@ typedef struct TwinContext {
     float *curr_frame;               ///< non-interleaved output
     float *prev_frame;               ///< non-interleaved previous frame
     int last_block_pos[2];
+    int discarded_packets;
 
     float *cos_tabs[3];
 
@@ -676,6 +678,9 @@ static void imdct_output(TwinContext *tctx, enum FrameType ftype, int wtype,
                          i);
     }
 
+    if (!out)
+        return;
+
     size2 = tctx->last_block_pos[0];
     size1 = mtab->size - size2;
     if (tctx->avctx->channels == 2) {
@@ -811,16 +816,16 @@ static void read_and_decode_spectrum(TwinContext *tctx, GetBitContext *gb,
 }
 
 static int twin_decode_frame(AVCodecContext * avctx, void *data,
-                             int *data_size, AVPacket *avpkt)
+                             int *got_frame_ptr, AVPacket *avpkt)
 {
     const uint8_t *buf = avpkt->data;
     int buf_size = avpkt->size;
     TwinContext *tctx = avctx->priv_data;
     GetBitContext gb;
     const ModeTab *mtab = tctx->mtab;
-    float *out = data;
+    float *out = NULL;
     enum FrameType ftype;
-    int window_type, out_size;
+    int window_type, ret;
     static const enum FrameType wtype_to_ftype_table[] = {
         FT_LONG,   FT_LONG, FT_SHORT, FT_LONG,
         FT_MEDIUM, FT_LONG, FT_LONG,  FT_MEDIUM, FT_MEDIUM
@@ -832,11 +837,14 @@ static int twin_decode_frame(AVCodecContext * avctx, void *data,
         return AVERROR(EINVAL);
     }
 
-    out_size = mtab->size * avctx->channels *
-               av_get_bytes_per_sample(avctx->sample_fmt);
-    if (*data_size < out_size) {
-        av_log(avctx, AV_LOG_ERROR, "output buffer is too small\n");
-        return AVERROR(EINVAL);
+    /* get output buffer */
+    if (tctx->discarded_packets >= 2) {
+        tctx->frame.nb_samples = mtab->size;
+        if ((ret = avctx->get_buffer(avctx, &tctx->frame)) < 0) {
+            av_log(avctx, AV_LOG_ERROR, "get_buffer() failed\n");
+            return ret;
+        }
+        out = (float *)tctx->frame.data[0];
     }
 
     init_get_bits(&gb, buf, buf_size * 8);
@@ -856,12 +864,14 @@ static int twin_decode_frame(AVCodecContext * avctx, void *data,
 
     FFSWAP(float*, tctx->curr_frame, tctx->prev_frame);
 
-    if (tctx->avctx->frame_number < 2) {
-        *data_size=0;
+    if (tctx->discarded_packets < 2) {
+        tctx->discarded_packets++;
+        *got_frame_ptr = 0;
         return buf_size;
     }
 
-    *data_size = out_size;
+    *got_frame_ptr   = 1;
+    *(AVFrame *)data = tctx->frame;
 
     return buf_size;
 }
@@ -990,14 +1000,16 @@ static av_cold void construct_perm_table(TwinContext *tctx,enum FrameType ftype)
 {
     int block_size;
     const ModeTab *mtab = tctx->mtab;
-    int size = tctx->avctx->channels*mtab->fmode[ftype].sub;
+    int size;
     int16_t *tmp_perm = (int16_t *) tctx->tmp_buf;
 
     if (ftype == FT_PPC) {
         size  = tctx->avctx->channels;
         block_size = mtab->ppc_shape_len;
-    } else
+    } else {
+        size       = tctx->avctx->channels * mtab->fmode[ftype].sub;
         block_size = mtab->size / mtab->fmode[ftype].sub;
+    }
 
     permutate_in_line(tmp_perm, tctx->n_div[ftype], size,
                       block_size, tctx->length[ftype],
@@ -1143,7 +1155,7 @@ static av_cold int twin_decode_init(AVCodecContext *avctx)
         return -1;
     }
 
-    dsputil_init(&tctx->dsp, avctx);
+    ff_dsputil_init(&tctx->dsp, avctx);
     if ((ret = init_mdct_win(tctx))) {
         av_log(avctx, AV_LOG_ERROR, "Error initializing MDCT\n");
         twin_decode_close(avctx);
@@ -1152,6 +1164,9 @@ static av_cold int twin_decode_init(AVCodecContext *avctx)
     init_bitstream_params(tctx);
 
     memset_float(tctx->bark_hist[0][0], 0.1, FF_ARRAY_ELEMS(tctx->bark_hist));
+
+    avcodec_get_frame_defaults(&tctx->frame);
+    avctx->coded_frame = &tctx->frame;
 
     return 0;
 }
@@ -1164,5 +1179,6 @@ AVCodec ff_twinvq_decoder = {
     .init           = twin_decode_init,
     .close          = twin_decode_close,
     .decode         = twin_decode_frame,
+    .capabilities   = CODEC_CAP_DR1,
     .long_name      = NULL_IF_CONFIG_SMALL("VQF TwinVQ"),
 };

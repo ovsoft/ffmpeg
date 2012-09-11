@@ -29,10 +29,13 @@
  * format handling
  */
 
-#include "libavutil/imgutils.h"
-#include "libavutil/opt.h"
-#include "libavcodec/avcodec.h"
-#include "libavutil/mathematics.h"
+#include <math.h>
+
+#include <libavutil/imgutils.h>
+#include <libavutil/opt.h>
+#include <libavcodec/avcodec.h>
+#include <libavutil/mathematics.h>
+#include <libavutil/samplefmt.h>
 
 #define INBUF_SIZE 4096
 #define AUDIO_INBUF_SIZE 20480
@@ -51,7 +54,7 @@ static void audio_encode_example(const char *filename)
     float t, tincr;
     uint8_t *outbuf;
 
-    printf("Audio encoding\n");
+    printf("Encode audio file %s\n", filename);
 
     /* find the MP2 encoder */
     codec = avcodec_find_encoder(CODEC_ID_MP2);
@@ -69,7 +72,7 @@ static void audio_encode_example(const char *filename)
     c->sample_fmt = AV_SAMPLE_FMT_S16;
 
     /* open it */
-    if (avcodec_open(c, codec) < 0) {
+    if (avcodec_open2(c, codec, NULL) < 0) {
         fprintf(stderr, "could not open codec\n");
         exit(1);
     }
@@ -114,15 +117,15 @@ static void audio_decode_example(const char *outfilename, const char *filename)
 {
     AVCodec *codec;
     AVCodecContext *c= NULL;
-    int out_size, len;
+    int len;
     FILE *f, *outfile;
-    uint8_t *outbuf;
     uint8_t inbuf[AUDIO_INBUF_SIZE + FF_INPUT_BUFFER_PADDING_SIZE];
     AVPacket avpkt;
+    AVFrame *decoded_frame = NULL;
 
     av_init_packet(&avpkt);
 
-    printf("Audio decoding\n");
+    printf("Decode audio file %s\n", filename);
 
     /* find the mpeg audio decoder */
     codec = avcodec_find_decoder(CODEC_ID_MP2);
@@ -134,12 +137,10 @@ static void audio_decode_example(const char *outfilename, const char *filename)
     c = avcodec_alloc_context3(codec);
 
     /* open it */
-    if (avcodec_open(c, codec) < 0) {
+    if (avcodec_open2(c, codec, NULL) < 0) {
         fprintf(stderr, "could not open codec\n");
         exit(1);
     }
-
-    outbuf = malloc(AVCODEC_MAX_AUDIO_FRAME_SIZE);
 
     f = fopen(filename, "rb");
     if (!f) {
@@ -157,18 +158,32 @@ static void audio_decode_example(const char *outfilename, const char *filename)
     avpkt.size = fread(inbuf, 1, AUDIO_INBUF_SIZE, f);
 
     while (avpkt.size > 0) {
-        out_size = AVCODEC_MAX_AUDIO_FRAME_SIZE;
-        len = avcodec_decode_audio3(c, (short *)outbuf, &out_size, &avpkt);
+        int got_frame = 0;
+
+        if (!decoded_frame) {
+            if (!(decoded_frame = avcodec_alloc_frame())) {
+                fprintf(stderr, "out of memory\n");
+                exit(1);
+            }
+        } else
+            avcodec_get_frame_defaults(decoded_frame);
+
+        len = avcodec_decode_audio4(c, decoded_frame, &got_frame, &avpkt);
         if (len < 0) {
             fprintf(stderr, "Error while decoding\n");
             exit(1);
         }
-        if (out_size > 0) {
+        if (got_frame) {
             /* if a frame has been decoded, output it */
-            fwrite(outbuf, 1, out_size, outfile);
+            int data_size = av_samples_get_buffer_size(NULL, c->channels,
+                                                       decoded_frame->nb_samples,
+                                                       c->sample_fmt, 1);
+            fwrite(decoded_frame->data[0], 1, data_size, outfile);
         }
         avpkt.size -= len;
         avpkt.data += len;
+        avpkt.dts =
+        avpkt.pts = AV_NOPTS_VALUE;
         if (avpkt.size < AUDIO_REFILL_THRESH) {
             /* Refill the input buffer, to avoid trying to decode
              * incomplete frames. Instead of this, one could also use
@@ -185,10 +200,10 @@ static void audio_decode_example(const char *outfilename, const char *filename)
 
     fclose(outfile);
     fclose(f);
-    free(outbuf);
 
     avcodec_close(c);
     av_free(c);
+    av_free(decoded_frame);
 }
 
 /*
@@ -198,12 +213,13 @@ static void video_encode_example(const char *filename, int codec_id)
 {
     AVCodec *codec;
     AVCodecContext *c= NULL;
-    int i, out_size, size, x, y, outbuf_size;
+    int i, out_size, x, y, outbuf_size;
     FILE *f;
     AVFrame *picture;
     uint8_t *outbuf;
+    int had_output=0;
 
-    printf("Video encoding\n");
+    printf("Encode video file %s\n", filename);
 
     /* find the mpeg1 video encoder */
     codec = avcodec_find_encoder(codec_id);
@@ -230,7 +246,7 @@ static void video_encode_example(const char *filename, int codec_id)
         av_opt_set(c->priv_data, "preset", "slow", 0);
 
     /* open it */
-    if (avcodec_open(c, codec) < 0) {
+    if (avcodec_open2(c, codec, NULL) < 0) {
         fprintf(stderr, "could not open codec\n");
         exit(1);
     }
@@ -242,7 +258,7 @@ static void video_encode_example(const char *filename, int codec_id)
     }
 
     /* alloc image and output buffer */
-    outbuf_size = 100000;
+    outbuf_size = 100000 + 12*c->width*c->height;
     outbuf = malloc(outbuf_size);
 
     /* the image can be allocated by any means and av_image_alloc() is
@@ -271,15 +287,17 @@ static void video_encode_example(const char *filename, int codec_id)
 
         /* encode the image */
         out_size = avcodec_encode_video(c, outbuf, outbuf_size, picture);
+        had_output |= out_size;
         printf("encoding frame %3d (size=%5d)\n", i, out_size);
         fwrite(outbuf, 1, out_size, f);
     }
 
     /* get the delayed frames */
-    for(; out_size; i++) {
+    for(; out_size || !had_output; i++) {
         fflush(stdout);
 
         out_size = avcodec_encode_video(c, outbuf, outbuf_size, NULL);
+        had_output |= out_size;
         printf("write frame %3d (size=%5d)\n", i, out_size);
         fwrite(outbuf, 1, out_size, f);
     }
@@ -333,7 +351,7 @@ static void video_decode_example(const char *outfilename, const char *filename)
     /* set end of buffer to 0 (this ensures that no overreading happens for damaged mpeg streams) */
     memset(inbuf + INBUF_SIZE, 0, FF_INPUT_BUFFER_PADDING_SIZE);
 
-    printf("Video decoding\n");
+    printf("Decode video file %s\n", filename);
 
     /* find the mpeg1 video decoder */
     codec = avcodec_find_decoder(CODEC_ID_MPEG1VIDEO);
@@ -353,7 +371,7 @@ static void video_decode_example(const char *outfilename, const char *filename)
        available in the bitstream. */
 
     /* open it */
-    if (avcodec_open(c, codec) < 0) {
+    if (avcodec_open2(c, codec, NULL) < 0) {
         fprintf(stderr, "could not open codec\n");
         exit(1);
     }
@@ -439,9 +457,6 @@ static void video_decode_example(const char *outfilename, const char *filename)
 int main(int argc, char **argv)
 {
     const char *filename;
-
-    /* must be called before using avcodec lib */
-    avcodec_init();
 
     /* register all the codecs */
     avcodec_register_all();

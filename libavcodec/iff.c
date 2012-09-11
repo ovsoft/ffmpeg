@@ -44,6 +44,8 @@ typedef struct {
     uint8_t * planebuf;
     uint8_t * ham_buf;      ///< temporary buffer for planar to chunky conversation
     uint32_t *ham_palbuf;   ///< HAM decode table
+    uint32_t *mask_buf;     ///< temporary buffer for palette indices
+    uint32_t *mask_palbuf;  ///< masking palette table
     unsigned  compression;  ///< delta compression method used
     unsigned  bpp;          ///< bits per plane to decode (differs from bits_per_coded_sample if HAM)
     unsigned  ham;          ///< 0 if non-HAM or number of hold bits (6 for bpp > 6, 4 otherwise)
@@ -137,6 +139,7 @@ static av_always_inline uint32_t gray2rgb(const uint32_t x) {
  */
 static int ff_cmap_read_palette(AVCodecContext *avctx, uint32_t *pal)
 {
+    IffContext *s = avctx->priv_data;
     int count, i;
     const uint8_t *const palette = avctx->extradata + AV_RB16(avctx->extradata);
     int palette_size = avctx->extradata_size - AV_RB16(avctx->extradata);
@@ -153,6 +156,11 @@ static int ff_cmap_read_palette(AVCodecContext *avctx, uint32_t *pal)
         for (i=0; i < count; i++) {
             pal[i] = 0xFF000000 | AV_RB24(palette + i*3);
         }
+        if (s->flags && count >= 32) { // EHB
+            for (i = 0; i < 32; i++)
+                pal[i + 32] = 0xFF000000 | (AV_RB24(palette + i*3) & 0xFEFEFE) >> 1;
+            count = FFMAX(count, 64);
+        }
     } else { // Create gray-scale color palette for bps < 8
         count = 1 << avctx->bits_per_coded_sample;
 
@@ -160,6 +168,13 @@ static int ff_cmap_read_palette(AVCodecContext *avctx, uint32_t *pal)
             pal[i] = 0xFF000000 | gray2rgb((i * 255) >> avctx->bits_per_coded_sample);
         }
     }
+    if (s->masking == MASK_HAS_MASK) {
+        memcpy(pal + (1 << avctx->bits_per_coded_sample), pal, count * 4);
+        for (i = 0; i < count; i++)
+            pal[i] &= 0xFFFFFF;
+    } else if (s->masking == MASK_HAS_TRANSPARENT_COLOR &&
+        s->transparency < 1 << avctx->bits_per_coded_sample)
+        pal[s->transparency] &= 0xFFFFFF;
     return 0;
 }
 
@@ -176,7 +191,13 @@ static int extract_header(AVCodecContext *const avctx,
     const uint8_t *buf;
     unsigned buf_size;
     IffContext *s = avctx->priv_data;
-    int palette_size = avctx->extradata_size - AV_RB16(avctx->extradata);
+    int palette_size;
+
+    if (avctx->extradata_size < 2) {
+        av_log(avctx, AV_LOG_ERROR, "not enough extradata\n");
+        return AVERROR_INVALIDDATA;
+    }
+    palette_size = avctx->extradata_size - AV_RB16(avctx->extradata);
 
     if (avpkt) {
         int image_size;
@@ -192,8 +213,6 @@ static int extract_header(AVCodecContext *const avctx,
             return AVERROR_INVALIDDATA;
         }
     } else {
-        if (avctx->extradata_size < 2)
-            return AVERROR_INVALIDDATA;
         buf = avctx->extradata;
         buf_size = bytestream_get_be16(&buf);
         if (buf_size <= 1 || palette_size < 0) {
@@ -211,10 +230,22 @@ static int extract_header(AVCodecContext *const avctx,
         s->flags        = bytestream_get_byte(&buf);
         s->transparency = bytestream_get_be16(&buf);
         s->masking      = bytestream_get_byte(&buf);
-        if (s->masking == MASK_HAS_TRANSPARENT_COLOR) {
-            av_log(avctx, AV_LOG_ERROR, "Transparency not supported\n");
-            return AVERROR_PATCHWELCOME;
-        } else if (s->masking != MASK_NONE) {
+        if (s->masking == MASK_HAS_MASK) {
+            if (s->bpp >= 8) {
+                avctx->pix_fmt = PIX_FMT_RGB32;
+                av_freep(&s->mask_buf);
+                av_freep(&s->mask_palbuf);
+                s->mask_buf = av_malloc((s->planesize * 32) + FF_INPUT_BUFFER_PADDING_SIZE);
+                if (!s->mask_buf)
+                    return AVERROR(ENOMEM);
+                s->mask_palbuf = av_malloc((2 << s->bpp) * sizeof(uint32_t) + FF_INPUT_BUFFER_PADDING_SIZE);
+                if (!s->mask_palbuf) {
+                    av_freep(&s->mask_buf);
+                    return AVERROR(ENOMEM);
+                }
+            }
+            s->bpp++;
+        } else if (s->masking != MASK_NONE && s->masking != MASK_HAS_TRANSPARENT_COLOR) {
             av_log(avctx, AV_LOG_ERROR, "Masking not supported\n");
             return AVERROR_PATCHWELCOME;
         }
@@ -231,12 +262,15 @@ static int extract_header(AVCodecContext *const avctx,
 
         if (s->ham) {
             int i, count = FFMIN(palette_size / 3, 1 << s->ham);
+            int ham_count;
             const uint8_t *const palette = avctx->extradata + AV_RB16(avctx->extradata);
+
             s->ham_buf = av_malloc((s->planesize * 8) + FF_INPUT_BUFFER_PADDING_SIZE);
             if (!s->ham_buf)
                 return AVERROR(ENOMEM);
 
-            s->ham_palbuf = av_malloc((8 * (1 << s->ham) * sizeof (uint32_t)) + FF_INPUT_BUFFER_PADDING_SIZE);
+            ham_count = 8 * (1 << s->ham);
+            s->ham_palbuf = av_malloc((ham_count << !!(s->masking == MASK_HAS_MASK)) * sizeof (uint32_t) + FF_INPUT_BUFFER_PADDING_SIZE);
             if (!s->ham_palbuf) {
                 av_freep(&s->ham_buf);
                 return AVERROR(ENOMEM);
@@ -266,9 +300,10 @@ static int extract_header(AVCodecContext *const avctx,
                 s->ham_palbuf[(i+count*2)*2+1] = tmp;
                 s->ham_palbuf[(i+count*3)*2+1] = tmp << 8;
             }
-        } else if (s->flags & 1) { // EHB (ExtraHalfBrite) color palette
-            av_log(avctx, AV_LOG_ERROR, "ExtraHalfBrite (EHB) mode not supported\n");
-            return AVERROR_PATCHWELCOME;
+            if (s->masking == MASK_HAS_MASK) {
+                for (i = 0; i < ham_count; i++)
+                    s->ham_palbuf[(1 << s->bpp) + i] = s->ham_palbuf[i] | 0xFF000000;
+            }
         }
     }
 
@@ -281,11 +316,17 @@ static av_cold int decode_init(AVCodecContext *avctx)
     int err;
 
     if (avctx->bits_per_coded_sample <= 8) {
-        int palette_size = avctx->extradata_size - AV_RB16(avctx->extradata);
+        int palette_size;
+
+        if (avctx->extradata_size >= 2)
+            palette_size = avctx->extradata_size - AV_RB16(avctx->extradata);
+        else
+            palette_size = 0;
         avctx->pix_fmt = (avctx->bits_per_coded_sample < 8) ||
                          (avctx->extradata_size >= 2 && palette_size) ? PIX_FMT_PAL8 : PIX_FMT_GRAY8;
     } else if (avctx->bits_per_coded_sample <= 32) {
-        avctx->pix_fmt = PIX_FMT_BGR32;
+        if (avctx->codec_tag != MKTAG('D','E','E','P'))
+            avctx->pix_fmt = PIX_FMT_BGR32;
     } else {
         return AVERROR_INVALIDDATA;
     }
@@ -382,6 +423,14 @@ static void decode_ham_plane32(uint32_t *dst, const uint8_t  *buf,
     } while (--buf_size);
 }
 
+static void lookup_pal_indicies(uint32_t *dst, const uint32_t *buf,
+                         const uint32_t *const pal, unsigned width)
+{
+    do {
+        *dst++ = pal[*buf++];
+    } while (--width);
+}
+
 /**
  * Decode one complete byterun1 encoded line.
  *
@@ -434,7 +483,7 @@ static int decode_frame_ilbm(AVCodecContext *avctx,
     } else if ((res = avctx->get_buffer(avctx, &s->frame)) < 0) {
         av_log(avctx, AV_LOG_ERROR, "get_buffer() failed\n");
         return res;
-    } else if (avctx->bits_per_coded_sample <= 8 && avctx->pix_fmt != PIX_FMT_GRAY8) {
+    } else if (avctx->bits_per_coded_sample <= 8 && avctx->pix_fmt == PIX_FMT_PAL8) {
         if ((res = ff_cmap_read_palette(avctx, (uint32_t*)s->frame.data[1])) < 0)
             return res;
     }
@@ -462,6 +511,18 @@ static int decode_frame_ilbm(AVCodecContext *avctx,
                     decodeplane8(s->ham_buf, start, FFMIN(s->planesize, buf_end - start), plane);
                 }
                 decode_ham_plane32((uint32_t *) row, s->ham_buf, s->ham_palbuf, s->planesize);
+            }
+        }
+    } else if (avctx->codec_tag == MKTAG('D','E','E','P')) {
+        int raw_width = avctx->width * (av_get_bits_per_pixel(&av_pix_fmt_descriptors[avctx->pix_fmt]) >> 3);
+        int x;
+        for(y = 0; y < avctx->height && buf < buf_end; y++ ) {
+            uint8_t *row = &s->frame.data[0][y * s->frame.linesize[0]];
+            memcpy(row, buf, FFMIN(raw_width, buf_end - buf));
+            buf += raw_width;
+            if (avctx->pix_fmt == PIX_FMT_BGR32) {
+                for(x = 0; x < avctx->width; x++)
+                    row[4 * x + 3] = row[4 * x + 3] & 0xF0 | (row[4 * x + 3] >> 4);
             }
         }
     } else if (avctx->codec_tag == MKTAG('I','L','B','M')) { // interleaved
@@ -494,18 +555,23 @@ static int decode_frame_ilbm(AVCodecContext *avctx,
                 }
             }
         }
-    } else if (avctx->pix_fmt == PIX_FMT_PAL8 || avctx->pix_fmt == PIX_FMT_GRAY8) { // IFF-PBM
-        for(y = 0; y < avctx->height; y++ ) {
-            uint8_t *row = &s->frame.data[0][y * s->frame.linesize[0]];
-            memcpy(row, buf, FFMIN(avctx->width, buf_end - buf));
-            buf += avctx->width + (avctx->width % 2); // padding if odd
-        }
-    } else { // IFF-PBM: HAM to PIX_FMT_BGR32
-        for (y = 0; y < avctx->height; y++) {
-            uint8_t *row = &s->frame.data[0][ y*s->frame.linesize[0] ];
-            memcpy(s->ham_buf, buf, FFMIN(avctx->width, buf_end - buf));
-            buf += avctx->width + (avctx->width & 1); // padding if odd
-            decode_ham_plane32((uint32_t *) row, s->ham_buf, s->ham_palbuf, avctx->width);
+    } else if (avctx->codec_tag == MKTAG('P','B','M',' ')) { // IFF-PBM
+        if (avctx->pix_fmt == PIX_FMT_PAL8 || avctx->pix_fmt == PIX_FMT_GRAY8) {
+            for(y = 0; y < avctx->height; y++ ) {
+                uint8_t *row = &s->frame.data[0][y * s->frame.linesize[0]];
+                memcpy(row, buf, FFMIN(avctx->width, buf_end - buf));
+                buf += avctx->width + (avctx->width % 2); // padding if odd
+            }
+        } else if (s->ham) { // IFF-PBM: HAM to PIX_FMT_BGR32
+            for (y = 0; y < avctx->height; y++) {
+                uint8_t *row = &s->frame.data[0][ y*s->frame.linesize[0] ];
+                memcpy(s->ham_buf, buf, FFMIN(avctx->width, buf_end - buf));
+                buf += avctx->width + (avctx->width & 1); // padding if odd
+                decode_ham_plane32((uint32_t *) row, s->ham_buf, s->ham_palbuf, s->planesize);
+            }
+        } else {
+            av_log_ask_for_sample(avctx, "unsupported bpp\n");
+            return AVERROR_INVALIDDATA;
         }
     }
 
@@ -534,8 +600,11 @@ static int decode_frame_byterun1(AVCodecContext *avctx,
     } else if ((res = avctx->get_buffer(avctx, &s->frame)) < 0) {
         av_log(avctx, AV_LOG_ERROR, "get_buffer() failed\n");
         return res;
-    } else if (avctx->bits_per_coded_sample <= 8 && avctx->pix_fmt != PIX_FMT_GRAY8) {
+    } else if (avctx->pix_fmt == PIX_FMT_PAL8) {
         if ((res = ff_cmap_read_palette(avctx, (uint32_t*)s->frame.data[1])) < 0)
+            return res;
+    } else if (avctx->pix_fmt == PIX_FMT_RGB32 && avctx->bits_per_coded_sample <= 8) {
+        if ((res = ff_cmap_read_palette(avctx, s->mask_palbuf)) < 0)
             return res;
     }
     s->init = 1;
@@ -549,6 +618,16 @@ static int decode_frame_byterun1(AVCodecContext *avctx,
                     buf += decode_byterun(s->planebuf, s->planesize, buf, buf_end);
                     decodeplane8(row, s->planebuf, s->planesize, plane);
                 }
+            }
+        } else if (avctx->bits_per_coded_sample <= 8) { //8-bit (+ mask) to PIX_FMT_BGR32
+            for (y = 0; y < avctx->height ; y++ ) {
+                uint8_t *row = &s->frame.data[0][y*s->frame.linesize[0]];
+                memset(s->mask_buf, 0, avctx->width * sizeof(uint32_t));
+                for (plane = 0; plane < s->bpp; plane++) {
+                    buf += decode_byterun(s->planebuf, s->planesize, buf, buf_end);
+                    decodeplane32(s->mask_buf, s->planebuf, s->planesize, plane);
+                }
+                lookup_pal_indicies((uint32_t *) row, s->mask_buf, s->mask_palbuf, avctx->width);
             }
         } else if (s->ham) { // HAM to PIX_FMT_BGR32
             for (y = 0; y < avctx->height ; y++) {
@@ -570,16 +649,21 @@ static int decode_frame_byterun1(AVCodecContext *avctx,
                 }
             }
         }
-    } else if (avctx->pix_fmt == PIX_FMT_PAL8 || avctx->pix_fmt == PIX_FMT_GRAY8) { // IFF-PBM
-        for(y = 0; y < avctx->height ; y++ ) {
-            uint8_t *row = &s->frame.data[0][y*s->frame.linesize[0]];
-            buf += decode_byterun(row, avctx->width, buf, buf_end);
-        }
-    } else { // IFF-PBM: HAM to PIX_FMT_BGR32
-        for (y = 0; y < avctx->height ; y++) {
-            uint8_t *row = &s->frame.data[0][y*s->frame.linesize[0]];
-            buf += decode_byterun(s->ham_buf, avctx->width, buf, buf_end);
-            decode_ham_plane32((uint32_t *) row, s->ham_buf, s->ham_palbuf, avctx->width);
+    } else if (avctx->codec_tag == MKTAG('P','B','M',' ')) { // IFF-PBM
+        if (avctx->pix_fmt == PIX_FMT_PAL8 || avctx->pix_fmt == PIX_FMT_GRAY8) {
+            for(y = 0; y < avctx->height ; y++ ) {
+                uint8_t *row = &s->frame.data[0][y*s->frame.linesize[0]];
+                buf += decode_byterun(row, avctx->width, buf, buf_end);
+            }
+        } else if (s->ham) { // IFF-PBM: HAM to PIX_FMT_BGR32
+            for (y = 0; y < avctx->height ; y++) {
+                uint8_t *row = &s->frame.data[0][y*s->frame.linesize[0]];
+                buf += decode_byterun(s->ham_buf, avctx->width, buf, buf_end);
+                decode_ham_plane32((uint32_t *) row, s->ham_buf, s->ham_palbuf, s->planesize);
+            }
+        } else {
+            av_log_ask_for_sample(avctx, "unsupported bpp\n");
+            return AVERROR_INVALIDDATA;
         }
     }
 
@@ -608,7 +692,7 @@ AVCodec ff_iff_ilbm_decoder = {
     .close          = decode_end,
     .decode         = decode_frame_ilbm,
     .capabilities   = CODEC_CAP_DR1,
-    .long_name = NULL_IF_CONFIG_SMALL("IFF ILBM"),
+    .long_name      = NULL_IF_CONFIG_SMALL("IFF ILBM"),
 };
 
 AVCodec ff_iff_byterun1_decoder = {
@@ -620,5 +704,5 @@ AVCodec ff_iff_byterun1_decoder = {
     .close          = decode_end,
     .decode         = decode_frame_byterun1,
     .capabilities   = CODEC_CAP_DR1,
-    .long_name = NULL_IF_CONFIG_SMALL("IFF ByteRun1"),
+    .long_name      = NULL_IF_CONFIG_SMALL("IFF ByteRun1"),
 };

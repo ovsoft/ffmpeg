@@ -52,6 +52,7 @@ typedef struct {
     int smv_last_stream;
     int smv_eof;
     int audio_eof;
+    int ignore_length;
 } WAVContext;
 
 #if CONFIG_WAV_MUXER
@@ -223,8 +224,9 @@ AVOutputFormat ff_wav_muxer = {
     .write_header      = wav_write_header,
     .write_packet      = wav_write_packet,
     .write_trailer     = wav_write_trailer,
-    .codec_tag= (const AVCodecTag* const []){ff_codec_wav_tags, 0},
-    .priv_class = &wav_muxer_class,
+    .flags             = AVFMT_TS_NONSTRICT,
+    .codec_tag         = (const AVCodecTag* const []){ ff_codec_wav_tags, 0 },
+    .priv_class        = &wav_muxer_class,
 };
 #endif /* CONFIG_WAV_MUXER */
 
@@ -345,7 +347,7 @@ static int wav_parse_bext_tag(AVFormatContext *s, int64_t size)
             } else {
                 /* extended UMID */
                 snprintf(temp, sizeof(temp), "0x%016"PRIX64"%016"PRIX64"%016"PRIX64"%016"PRIX64
-                                             "0x%016"PRIX64"%016"PRIX64"%016"PRIX64"%016"PRIX64,
+                                               "%016"PRIX64"%016"PRIX64"%016"PRIX64"%016"PRIX64,
                          umid_parts[0], umid_parts[1], umid_parts[2], umid_parts[3],
                          umid_parts[4], umid_parts[5], umid_parts[6], umid_parts[7]);
             }
@@ -386,8 +388,7 @@ static const AVMetadataConv wav_metadata_conv[] = {
 };
 
 /* wav input */
-static int wav_read_header(AVFormatContext *s,
-                           AVFormatParameters *ap)
+static int wav_read_header(AVFormatContext *s)
 {
     int64_t size, av_uninit(data_size);
     int64_t sample_count=0;
@@ -498,7 +499,7 @@ static int wav_read_header(AVFormatContext *s,
             wav->smv_data_ofs = avio_tell(pb) + (size - 5) * 3;
             avio_rl24(pb);
             wav->smv_block_size = avio_rl24(pb);
-            av_set_pts_info(vst, 32, 1, avio_rl24(pb));
+            avpriv_set_pts_info(vst, 32, 1, avio_rl24(pb));
             vst->duration = avio_rl24(pb);
             avio_rl24(pb);
             avio_rl24(pb);
@@ -506,8 +507,8 @@ static int wav_read_header(AVFormatContext *s,
             goto break_loop;
         case MKTAG('L', 'I', 'S', 'T'):
             list_type = avio_rl32(pb);
-            if (size <= 4) {
-                av_log(s, AV_LOG_ERROR, "too short LIST");
+            if (size < 4) {
+                av_log(s, AV_LOG_ERROR, "too short LIST tag\n");
                 return AVERROR_INVALIDDATA;
             }
             switch (list_type) {
@@ -618,6 +619,8 @@ smv_out:
     st = s->streams[0];
 
     left = wav->data_end - avio_tell(s->pb);
+    if (wav->ignore_length)
+        left= INT_MAX;
     if (left <= 0){
         if (CONFIG_W64_DEMUXER && wav->w64)
             left = find_guid(s->pb, guid_data) - 24;
@@ -674,9 +677,22 @@ static int wav_read_seek(AVFormatContext *s,
     default:
         break;
     }
-    return pcm_read_seek(s, stream_index, timestamp, flags);
+    return ff_pcm_read_seek(s, stream_index, timestamp, flags);
 }
 
+#define OFFSET(x) offsetof(WAVContext, x)
+#define DEC AV_OPT_FLAG_DECODING_PARAM
+static const AVOption demux_options[] = {
+    { "ignore_length", "Ignore length", OFFSET(ignore_length), AV_OPT_TYPE_INT, { 0 }, 0, 1, DEC },
+    { NULL },
+};
+
+static const AVClass wav_demuxer_class = {
+    .class_name = "WAV demuxer",
+    .item_name  = av_default_item_name,
+    .option     = demux_options,
+    .version    = LIBAVUTIL_VERSION_INT,
+};
 AVInputFormat ff_wav_demuxer = {
     .name           = "wav",
     .long_name      = NULL_IF_CONFIG_SMALL("WAV format"),
@@ -685,8 +701,9 @@ AVInputFormat ff_wav_demuxer = {
     .read_header    = wav_read_header,
     .read_packet    = wav_read_packet,
     .read_seek      = wav_read_seek,
-    .flags= AVFMT_GENERIC_INDEX,
-    .codec_tag= (const AVCodecTag* const []){ff_codec_wav_tags, 0},
+    .flags          = AVFMT_GENERIC_INDEX,
+    .codec_tag      = (const AVCodecTag* const []){ ff_codec_wav_tags, 0 },
+    .priv_class     = &wav_demuxer_class,
 };
 #endif /* CONFIG_WAV_DEMUXER */
 
@@ -712,7 +729,7 @@ static int w64_probe(AVProbeData *p)
         return 0;
 }
 
-static int w64_read_header(AVFormatContext *s, AVFormatParameters *ap)
+static int w64_read_header(AVFormatContext *s)
 {
     int64_t size;
     AVIOContext *pb  = s->pb;
@@ -773,7 +790,7 @@ AVInputFormat ff_w64_demuxer = {
     .read_header    = w64_read_header,
     .read_packet    = wav_read_packet,
     .read_seek      = wav_read_seek,
-    .flags = AVFMT_GENERIC_INDEX,
-    .codec_tag = (const AVCodecTag* const []){ff_codec_wav_tags, 0},
+    .flags          = AVFMT_GENERIC_INDEX,
+    .codec_tag      = (const AVCodecTag* const []){ ff_codec_wav_tags, 0 },
 };
 #endif /* CONFIG_W64_DEMUXER */

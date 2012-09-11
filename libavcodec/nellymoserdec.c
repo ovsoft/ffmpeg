@@ -41,21 +41,23 @@
 #include "fmtconvert.h"
 #include "sinewin.h"
 
-#define ALT_BITSTREAM_READER_LE
+#define BITSTREAM_READER_LE
 #include "get_bits.h"
 
 
 typedef struct NellyMoserDecodeContext {
     AVCodecContext* avctx;
+    AVFrame         frame;
     float          *float_buf;
-    DECLARE_ALIGNED(16, float, state)[NELLY_BUF_LEN];
     AVLFG           random_state;
     GetBitContext   gb;
     float           scale_bias;
     DSPContext      dsp;
     FFTContext      imdct_ctx;
     FmtConvertContext fmt_conv;
-    DECLARE_ALIGNED(32, float, imdct_out)[NELLY_BUF_LEN * 2];
+    DECLARE_ALIGNED(32, float, imdct_buf)[2][NELLY_BUF_LEN];
+    float          *imdct_out;
+    float          *imdct_prev;
 } NellyMoserDecodeContext;
 
 static void nelly_decode_block(NellyMoserDecodeContext *s,
@@ -105,12 +107,9 @@ static void nelly_decode_block(NellyMoserDecodeContext *s,
         memset(&aptr[NELLY_FILL_LEN], 0,
                (NELLY_BUF_LEN - NELLY_FILL_LEN) * sizeof(float));
 
-        s->imdct_ctx.imdct_calc(&s->imdct_ctx, s->imdct_out, aptr);
-        /* XXX: overlapping and windowing should be part of a more
-           generic imdct function */
-        s->dsp.vector_fmul_reverse(s->state, s->state, ff_sine_128, NELLY_BUF_LEN);
-        s->dsp.vector_fmul_add(aptr, s->imdct_out, ff_sine_128, s->state, NELLY_BUF_LEN);
-        memcpy(s->state, s->imdct_out + NELLY_BUF_LEN, sizeof(float)*NELLY_BUF_LEN);
+        s->imdct_ctx.imdct_half(&s->imdct_ctx, s->imdct_out, aptr);
+        s->dsp.vector_fmul_window(aptr, s->imdct_prev + NELLY_BUF_LEN/2, s->imdct_out, ff_sine_128, NELLY_BUF_LEN/2);
+        FFSWAP(float *, s->imdct_out, s->imdct_prev);
     }
 }
 
@@ -118,10 +117,12 @@ static av_cold int decode_init(AVCodecContext * avctx) {
     NellyMoserDecodeContext *s = avctx->priv_data;
 
     s->avctx = avctx;
+    s->imdct_out = s->imdct_buf[0];
+    s->imdct_prev = s->imdct_buf[1];
     av_lfg_init(&s->random_state, 0);
     ff_mdct_init(&s->imdct_ctx, 8, 1, 1.0);
 
-    dsputil_init(&s->dsp, avctx);
+    ff_dsputil_init(&s->dsp, avctx);
 
     if (avctx->request_sample_fmt == AV_SAMPLE_FMT_FLT) {
         s->scale_bias = 1.0/(32768*8);
@@ -142,33 +143,31 @@ static av_cold int decode_init(AVCodecContext * avctx) {
         ff_init_ff_sine_windows(7);
 
     avctx->channel_layout = AV_CH_LAYOUT_MONO;
+
+    avcodec_get_frame_defaults(&s->frame);
+    avctx->coded_frame = &s->frame;
+
     return 0;
 }
 
-static int decode_tag(AVCodecContext * avctx,
-                      void *data, int *data_size,
-                      AVPacket *avpkt) {
+static int decode_tag(AVCodecContext *avctx, void *data,
+                      int *got_frame_ptr, AVPacket *avpkt)
+{
     const uint8_t *buf = avpkt->data;
     const uint8_t *side=av_packet_get_side_data(avpkt, 'F', NULL);
     int buf_size = avpkt->size;
     NellyMoserDecodeContext *s = avctx->priv_data;
-    int data_max = *data_size;
-    int blocks, i, block_size;
-    int16_t *samples_s16 = data;
-    float   *samples_flt = data;
-    *data_size = 0;
+    int blocks, i, ret;
+    int16_t *samples_s16;
+    float   *samples_flt;
 
-    block_size = NELLY_SAMPLES * av_get_bytes_per_sample(avctx->sample_fmt);
     blocks     = buf_size / NELLY_BLOCK_LEN;
 
     if (blocks <= 0) {
         av_log(avctx, AV_LOG_ERROR, "Packet is too small\n");
         return AVERROR_INVALIDDATA;
     }
-    if (data_max < blocks * block_size) {
-        av_log(avctx, AV_LOG_ERROR, "Output buffer is too small\n");
-        return AVERROR(EINVAL);
-    }
+
     if (buf_size % NELLY_BLOCK_LEN) {
         av_log(avctx, AV_LOG_WARNING, "Leftover bytes: %d.\n",
                buf_size % NELLY_BLOCK_LEN);
@@ -183,8 +182,17 @@ static int decode_tag(AVCodecContext * avctx,
     if(side && blocks>1 && avctx->sample_rate%11025==0 && (1<<((side[0]>>2)&3)) == blocks)
         avctx->sample_rate= 11025*(blocks/2);
 
+    /* get output buffer */
+    s->frame.nb_samples = NELLY_SAMPLES * blocks;
+    if ((ret = avctx->get_buffer(avctx, &s->frame)) < 0) {
+        av_log(avctx, AV_LOG_ERROR, "get_buffer() failed\n");
+        return ret;
+    }
+    samples_s16 = (int16_t *)s->frame.data[0];
+    samples_flt = (float   *)s->frame.data[0];
+
     for (i=0 ; i<blocks ; i++) {
-        if (avctx->sample_fmt == SAMPLE_FMT_FLT) {
+        if (avctx->sample_fmt == AV_SAMPLE_FMT_FLT) {
             nelly_decode_block(s, buf, samples_flt);
             samples_flt += NELLY_SAMPLES;
         } else {
@@ -194,7 +202,9 @@ static int decode_tag(AVCodecContext * avctx,
         }
         buf += NELLY_BLOCK_LEN;
     }
-    *data_size = blocks * block_size;
+
+    *got_frame_ptr   = 1;
+    *(AVFrame *)data = s->frame;
 
     return buf_size;
 }
@@ -204,6 +214,7 @@ static av_cold int decode_end(AVCodecContext * avctx) {
 
     av_freep(&s->float_buf);
     ff_mdct_end(&s->imdct_ctx);
+
     return 0;
 }
 
@@ -215,9 +226,9 @@ AVCodec ff_nellymoser_decoder = {
     .init           = decode_init,
     .close          = decode_end,
     .decode         = decode_tag,
-    .long_name = NULL_IF_CONFIG_SMALL("Nellymoser Asao"),
+    .capabilities   = CODEC_CAP_DR1 | CODEC_CAP_PARAM_CHANGE,
+    .long_name      = NULL_IF_CONFIG_SMALL("Nellymoser Asao"),
     .sample_fmts    = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_FLT,
                                                       AV_SAMPLE_FMT_S16,
                                                       AV_SAMPLE_FMT_NONE },
 };
-

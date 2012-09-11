@@ -35,8 +35,10 @@
 #include "libavutil/opt.h"
 #include "libavutil/imgutils.h"
 #include "libavformat/avformat.h"
+#include "audio.h"
 #include "avcodec.h"
 #include "avfilter.h"
+#include "formats.h"
 
 typedef struct {
     /* common A/V fields */
@@ -46,6 +48,7 @@ typedef struct {
     char *format_name;
     char *file_name;
     int stream_index;
+    int loop_count;
 
     AVFormatContext *format_ctx;
     AVCodecContext *codec_ctx;
@@ -57,8 +60,6 @@ typedef struct {
     AVFilterBufferRef *picref;
 
     /* audio-only fields */
-    void *samples_buf;
-    int samples_buf_size;
     int bps;            ///< bytes per sample
     AVPacket pkt, pkt0;
     AVFilterBufferRef *samplesref;
@@ -73,6 +74,7 @@ static const AVOption movie_options[]= {
 {"si",           "set stream index",        OFFSET(stream_index), AV_OPT_TYPE_INT,    {.dbl = -1},  -1,       INT_MAX  },
 {"seek_point",   "set seekpoint (seconds)", OFFSET(seek_point_d), AV_OPT_TYPE_DOUBLE, {.dbl =  0},  0,        (INT64_MAX-1) / 1000000 },
 {"sp",           "set seekpoint (seconds)", OFFSET(seek_point_d), AV_OPT_TYPE_DOUBLE, {.dbl =  0},  0,        (INT64_MAX-1) / 1000000 },
+{"loop",         "set loop count",          OFFSET(loop_count),   AV_OPT_TYPE_INT,    {.dbl =  1},  0,        INT_MAX  },
 {NULL},
 };
 
@@ -176,6 +178,11 @@ static av_cold int movie_common_init(AVFilterContext *ctx, const char *args, voi
            movie->seek_point, movie->format_name, movie->file_name,
            movie->stream_index);
 
+    if (!(movie->frame = avcodec_alloc_frame()) ) {
+        av_log(ctx, AV_LOG_ERROR, "Failed to alloc frame\n");
+        return AVERROR(ENOMEM);
+    }
+
     return 0;
 }
 
@@ -188,13 +195,12 @@ static av_cold void movie_common_uninit(AVFilterContext *ctx)
     if (movie->codec_ctx)
         avcodec_close(movie->codec_ctx);
     if (movie->format_ctx)
-        av_close_input_file(movie->format_ctx);
+        avformat_close_input(&movie->format_ctx);
 
     avfilter_unref_buffer(movie->picref);
     av_freep(&movie->frame);
 
     avfilter_unref_buffer(movie->samplesref);
-    av_freep(&movie->samples_buf);
 }
 
 #if CONFIG_MOVIE_FILTER
@@ -206,11 +212,6 @@ static av_cold int movie_init(AVFilterContext *ctx, const char *args, void *opaq
 
     if ((ret = movie_common_init(ctx, args, opaque, AVMEDIA_TYPE_VIDEO)) < 0)
         return ret;
-
-    if (!(movie->frame = avcodec_alloc_frame()) ) {
-        av_log(ctx, AV_LOG_ERROR, "Failed to alloc frame\n");
-        return AVERROR(ENOMEM);
-    }
 
     movie->w = movie->codec_ctx->width;
     movie->h = movie->codec_ctx->height;
@@ -248,7 +249,27 @@ static int movie_get_frame(AVFilterLink *outlink)
     if (movie->is_done == 1)
         return 0;
 
-    while ((ret = av_read_frame(movie->format_ctx, &pkt)) >= 0) {
+    while (1) {
+        ret = av_read_frame(movie->format_ctx, &pkt);
+        if (ret == AVERROR_EOF) {
+            int64_t timestamp;
+            if (movie->loop_count != 1) {
+                timestamp = movie->seek_point;
+                if (movie->format_ctx->start_time != AV_NOPTS_VALUE)
+                    timestamp += movie->format_ctx->start_time;
+                if (av_seek_frame(movie->format_ctx, -1, timestamp, AVSEEK_FLAG_BACKWARD) < 0) {
+                    movie->is_done = 1;
+                    break;
+                } else if (movie->loop_count>1)
+                    movie->loop_count--;
+                continue;
+            } else {
+                movie->is_done = 1;
+                break;
+            }
+        } else if (ret < 0)
+            break;
+
         // Is this a packet from the video stream?
         if (pkt.stream_index == movie->stream_index) {
             avcodec_decode_video2(movie->codec_ctx, movie->frame, &frame_decoded, &pkt);
@@ -267,6 +288,7 @@ static int movie_get_frame(AVFilterLink *outlink)
                 /* use pkt_dts if pkt_pts is not available */
                 movie->picref->pts = movie->frame->pkt_pts == AV_NOPTS_VALUE ?
                     movie->frame->pkt_dts : movie->frame->pkt_pts;
+
                 if (!movie->frame->sample_aspect_ratio.num)
                     movie->picref->video->sample_aspect_ratio = st->sample_aspect_ratio;
                 av_dlog(outlink->src,
@@ -286,10 +308,6 @@ static int movie_get_frame(AVFilterLink *outlink)
         av_free_packet(&pkt);
     }
 
-    // On multi-frame source we should stop the mixing process when
-    // the movie source does not have more frames
-    if (ret == AVERROR_EOF)
-        movie->is_done = 1;
     return ret;
 }
 
@@ -352,13 +370,13 @@ static int amovie_query_formats(AVFilterContext *ctx)
     AVCodecContext *c = movie->codec_ctx;
 
     enum AVSampleFormat sample_fmts[] = { c->sample_fmt, -1 };
-    int packing_fmts[] = { AVFILTER_PACKED, -1 };
+    int sample_rates[] = { c->sample_rate, -1 };
     int64_t chlayouts[] = { c->channel_layout ? c->channel_layout :
                             av_get_default_channel_layout(c->channels), -1 };
 
     avfilter_set_common_sample_formats (ctx, avfilter_make_format_list(sample_fmts));
-    avfilter_set_common_packing_formats(ctx, avfilter_make_format_list(packing_fmts));
-    avfilter_set_common_channel_layouts(ctx, avfilter_make_format64_list(chlayouts));
+    ff_set_common_samplerates          (ctx, avfilter_make_format_list(sample_rates));
+    ff_set_common_channel_layouts(ctx, avfilter_make_format64_list(chlayouts));
 
     return 0;
 }
@@ -378,7 +396,7 @@ static int amovie_get_samples(AVFilterLink *outlink)
 {
     MovieContext *movie = outlink->src->priv;
     AVPacket pkt;
-    int ret, samples_size, decoded_data_size;
+    int ret, got_frame = 0;
 
     if (!movie->pkt.size && movie->is_done == 1)
         return AVERROR_EOF;
@@ -402,31 +420,27 @@ static int amovie_get_samples(AVFilterLink *outlink)
         }
     }
 
-    /* reallocate the buffer for the decoded samples, if necessary */
-    samples_size =
-        FFMAX(movie->pkt.size*sizeof(movie->bps), AVCODEC_MAX_AUDIO_FRAME_SIZE);
-    if (samples_size > movie->samples_buf_size) {
-        movie->samples_buf = av_fast_realloc(movie->samples_buf,
-                                             &movie->samples_buf_size, samples_size);
-        if (!movie->samples_buf)
-            return AVERROR(ENOMEM);
-    }
-    decoded_data_size = movie->samples_buf_size;
-
     /* decode and update the movie pkt */
-    ret = avcodec_decode_audio3(movie->codec_ctx, movie->samples_buf,
-                                &decoded_data_size, &movie->pkt);
-    if (ret < 0)
+    avcodec_get_frame_defaults(movie->frame);
+    ret = avcodec_decode_audio4(movie->codec_ctx, movie->frame, &got_frame, &movie->pkt);
+    if (ret < 0) {
+        movie->pkt.size = 0;
         return ret;
+    }
     movie->pkt.data += ret;
     movie->pkt.size -= ret;
 
     /* wrap the decoded data in a samplesref */
-    if (decoded_data_size > 0) {
-        int nb_samples = decoded_data_size / movie->bps / movie->codec_ctx->channels;
+    if (got_frame) {
+        int nb_samples = movie->frame->nb_samples;
+        int data_size =
+            av_samples_get_buffer_size(NULL, movie->codec_ctx->channels,
+                                       nb_samples, movie->codec_ctx->sample_fmt, 1);
+        if (data_size < 0)
+            return data_size;
         movie->samplesref =
-            avfilter_get_audio_buffer(outlink, AV_PERM_WRITE, nb_samples);
-        memcpy(movie->samplesref->data[0], movie->samples_buf, decoded_data_size);
+            ff_get_audio_buffer(outlink, AV_PERM_WRITE, nb_samples);
+        memcpy(movie->samplesref->data[0], movie->frame->data[0], data_size);
         movie->samplesref->pts = movie->pkt.pts;
         movie->samplesref->pos = movie->pkt.pos;
         movie->samplesref->audio->sample_rate = movie->codec_ctx->sample_rate;
@@ -451,7 +465,7 @@ static int amovie_request_frame(AVFilterLink *outlink)
             return ret;
     } while (!movie->samplesref);
 
-    avfilter_filter_samples(outlink, avfilter_ref_buffer(movie->samplesref, ~0));
+    ff_filter_samples(outlink, avfilter_ref_buffer(movie->samplesref, ~0));
     avfilter_unref_buffer(movie->samplesref);
     movie->samplesref = NULL;
 

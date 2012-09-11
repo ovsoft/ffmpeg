@@ -79,13 +79,13 @@ static const uint64_t thd_layout[13] = {
     AV_CH_LOW_FREQUENCY,                                    // LFE
     AV_CH_SIDE_LEFT|AV_CH_SIDE_RIGHT,                       // LRs
     AV_CH_TOP_FRONT_LEFT|AV_CH_TOP_FRONT_RIGHT,             // LRvh
-    AV_CH_SIDE_LEFT|AV_CH_SIDE_RIGHT,                       // LRc
+    AV_CH_FRONT_LEFT_OF_CENTER|AV_CH_FRONT_RIGHT_OF_CENTER, // LRc
     AV_CH_BACK_LEFT|AV_CH_BACK_RIGHT,                       // LRrs
     AV_CH_BACK_CENTER,                                      // Cs
-    AV_CH_TOP_BACK_CENTER,                                  // Ts
-    AV_CH_SIDE_LEFT|AV_CH_SIDE_RIGHT,                       // LRsd
-    AV_CH_FRONT_LEFT_OF_CENTER|AV_CH_FRONT_RIGHT_OF_CENTER, // LRw
-    AV_CH_TOP_BACK_CENTER,                                  // Cvh
+    AV_CH_TOP_CENTER,                                       // Ts
+    AV_CH_SIDE_LEFT|AV_CH_SIDE_RIGHT,                       // LRsd - TODO: Surround Direct
+    AV_CH_WIDE_LEFT|AV_CH_WIDE_RIGHT,                       // LRw
+    AV_CH_TOP_FRONT_CENTER,                                 // Cvh
     AV_CH_LOW_FREQUENCY                                     // LFE2
 };
 
@@ -109,7 +109,8 @@ static int truehd_channels(int chanmap)
 
 uint64_t ff_truehd_layout(int chanmap)
 {
-    int layout = 0, i;
+    int i;
+    uint64_t layout = 0;
 
     for (i = 0; i < 13; i++)
         layout |= thd_layout[i] * ((chanmap >> i) & 1);
@@ -263,6 +264,9 @@ static int mlp_parse(AVCodecParserContext *s,
         mp->bytes_left = ((mp->pc.index > 0 ? mp->pc.buffer[0] : buf[0]) << 8)
                        |  (mp->pc.index > 1 ? mp->pc.buffer[1] : buf[1-mp->pc.index]);
         mp->bytes_left = (mp->bytes_left & 0xfff) * 2;
+        if (mp->bytes_left <= 0) { // prevent infinite loop
+            goto lost_sync;
+        }
         mp->bytes_left -= mp->pc.index;
     }
 
@@ -311,7 +315,7 @@ static int mlp_parse(AVCodecParserContext *s,
         else
             avctx->sample_fmt = AV_SAMPLE_FMT_S16;
         avctx->sample_rate = mh.group1_samplerate;
-        avctx->frame_size = mh.access_unit_size;
+        s->duration = mh.access_unit_size;
 
         if (mh.stream_type == 0xbb) {
             /* MLP stream */
