@@ -696,7 +696,9 @@ static int avi_read_header(AVFormatContext *s)
             }
             break;
         case MKTAG('s', 't', 'r', 'd'):
-            if (stream_index >= (unsigned)s->nb_streams || s->streams[stream_index]->codec->extradata_size) {
+            if (stream_index >= (unsigned)s->nb_streams
+                || s->streams[stream_index]->codec->extradata_size
+                || s->streams[stream_index]->codec->codec_tag == MKTAG('H','2','6','4')) {
                 avio_skip(pb, size);
             } else {
                 uint64_t cur_pos = avio_tell(pb);
@@ -989,9 +991,9 @@ start_sync:
                || st->discard >= AVDISCARD_ALL){
                 if (!exit_early) {
                     ast->frame_offset += get_duration(ast, size);
+                    avio_skip(pb, size);
+                    goto start_sync;
                 }
-                avio_skip(pb, size);
-                goto start_sync;
             }
 
             if (d[2] == 'p' && d[3] == 'c' && size<=4*256+4) {
@@ -1262,6 +1264,11 @@ static int avi_read_idx1(AVFormatContext *s, int size)
     avi->stream_index = -1;
     avio_seek(pb, idx1_pos, SEEK_SET);
 
+    if (s->nb_streams == 1 && s->streams[0]->codec->codec_tag == AV_RL32("MMES")){
+        first_packet_pos = 0;
+        data_offset = avi->movi_list;
+    }
+
     /* Read the entries and sort them in each stream component. */
     for(i = 0; i < nb_index_entries; i++) {
         if(url_feof(pb))
@@ -1281,7 +1288,7 @@ static int avi_read_idx1(AVFormatContext *s, int size)
         st = s->streams[index];
         ast = st->priv_data;
 
-        if(first_packet && first_packet_pos && len) {
+        if (first_packet && first_packet_pos) {
             data_offset = first_packet_pos - pos;
             first_packet = 0;
         }

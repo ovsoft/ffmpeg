@@ -1614,8 +1614,10 @@ static int matroska_read_header(AVFormatContext *s)
             avio_wl16(&b, 1);
             avio_wl16(&b, track->audio.channels);
             avio_wl16(&b, track->audio.bitdepth);
+            if (track->audio.out_samplerate < 0 || track->audio.out_samplerate > INT_MAX)
+                return AVERROR_INVALIDDATA;
             avio_wl32(&b, track->audio.out_samplerate);
-            avio_wl32(&b, matroska->ctx->duration * track->audio.out_samplerate);
+            avio_wl32(&b, av_rescale((matroska->duration * matroska->time_scale), track->audio.out_samplerate, AV_TIME_BASE * 1000));
         } else if (codec_id == CODEC_ID_RV10 || codec_id == CODEC_ID_RV20 ||
                    codec_id == CODEC_ID_RV30 || codec_id == CODEC_ID_RV40) {
             extradata_offset = 26;
@@ -2160,7 +2162,6 @@ static int matroska_parse_cluster_incremental(MatroskaDemuxContext *matroska)
         }
     }
 
-    if (res < 0)  matroska->done = 1;
     return res;
 }
 
@@ -2250,10 +2251,11 @@ static int matroska_read_seek(AVFormatContext *s, int stream_index,
         if (tracks[i].type == MATROSKA_TRACK_TYPE_SUBTITLE
             && !tracks[i].stream->discard != AVDISCARD_ALL) {
             index_sub = av_index_search_timestamp(tracks[i].stream, st->index_entries[index].timestamp, AVSEEK_FLAG_BACKWARD);
-            if (index_sub >= 0
-                && st->index_entries[index_sub].pos < st->index_entries[index_min].pos
-                && st->index_entries[index].timestamp - st->index_entries[index_sub].timestamp < 30000000000/matroska->time_scale)
-                index_min = index_sub;
+            while(index_sub >= 0
+                  && index_min >= 0
+                  && tracks[i].stream->index_entries[index_sub].pos < st->index_entries[index_min].pos
+                  && st->index_entries[index].timestamp - tracks[i].stream->index_entries[index_sub].timestamp < 30000000000/matroska->time_scale)
+                index_min--;
         }
     }
 

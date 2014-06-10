@@ -783,6 +783,17 @@ static int mkv_write_tag(AVFormatContext *s, AVDictionary *m, unsigned int eleme
     return 0;
 }
 
+static int mkv_check_tag(AVDictionary *m)
+{
+    AVDictionaryEntry *t = NULL;
+
+    while ((t = av_dict_get(m, "", t, AV_DICT_IGNORE_SUFFIX)))
+        if (av_strcasecmp(t->key, "title") && av_strcasecmp(t->key, "stereo_mode"))
+            return 1;
+
+    return 0;
+}
+
 static int mkv_write_tags(AVFormatContext *s)
 {
     ebml_master tags = {0};
@@ -790,7 +801,7 @@ static int mkv_write_tags(AVFormatContext *s)
 
     ff_metadata_conv_ctx(s, ff_mkv_metadata_conv, NULL);
 
-    if (av_dict_get(s->metadata, "", NULL, AV_DICT_IGNORE_SUFFIX)) {
+    if (mkv_check_tag(s->metadata)) {
         ret = mkv_write_tag(s, s->metadata, 0, 0, &tags);
         if (ret < 0) return ret;
     }
@@ -798,7 +809,7 @@ static int mkv_write_tags(AVFormatContext *s)
     for (i = 0; i < s->nb_streams; i++) {
         AVStream *st = s->streams[i];
 
-        if (!av_dict_get(st->metadata, "", 0, AV_DICT_IGNORE_SUFFIX))
+        if (!mkv_check_tag(st->metadata))
             continue;
 
         ret = mkv_write_tag(s, st->metadata, MATROSKA_ID_TAGTARGETS_TRACKUID, i + 1, &tags);
@@ -808,7 +819,7 @@ static int mkv_write_tags(AVFormatContext *s)
     for (i = 0; i < s->nb_chapters; i++) {
         AVChapter *ch = s->chapters[i];
 
-        if (!av_dict_get(ch->metadata, "", NULL, AV_DICT_IGNORE_SUFFIX))
+        if (!mkv_check_tag(ch->metadata))
             continue;
 
         ret = mkv_write_tag(s, ch->metadata, MATROSKA_ID_TAGTARGETS_CHAPTERUID, ch->id, &tags);
@@ -1304,6 +1315,32 @@ static int mkv_query_codec(enum CodecID codec_id, int std_compliance)
     return 0;
 }
 
+const AVCodecTag additional_audio_tags[] = {
+    { CODEC_ID_ALAC,      0XFFFFFFFF },
+    { CODEC_ID_EAC3,      0XFFFFFFFF },
+    { CODEC_ID_MLP,       0xFFFFFFFF },
+    { CODEC_ID_PCM_S16BE, 0xFFFFFFFF },
+    { CODEC_ID_PCM_S24BE, 0xFFFFFFFF },
+    { CODEC_ID_PCM_S32BE, 0xFFFFFFFF },
+    { CODEC_ID_QDM2,      0xFFFFFFFF },
+    { CODEC_ID_RA_144,    0xFFFFFFFF },
+    { CODEC_ID_RA_288,    0xFFFFFFFF },
+    { CODEC_ID_COOK,      0xFFFFFFFF },
+    { CODEC_ID_TRUEHD,    0xFFFFFFFF },
+    { CODEC_ID_TTA,       0xFFFFFFFF },
+    { CODEC_ID_WAVPACK,   0xFFFFFFFF },
+    { CODEC_ID_NONE,      0xFFFFFFFF }
+};
+
+const AVCodecTag additional_video_tags[] = {
+    { CODEC_ID_PRORES,    0xFFFFFFFF },
+    { CODEC_ID_RV10,      0xFFFFFFFF },
+    { CODEC_ID_RV20,      0xFFFFFFFF },
+    { CODEC_ID_RV30,      0xFFFFFFFF },
+    { CODEC_ID_RV40,      0xFFFFFFFF },
+    { CODEC_ID_NONE,      0xFFFFFFFF }
+};
+
 #if CONFIG_MATROSKA_MUXER
 AVOutputFormat ff_matroska_muxer = {
     .name              = "matroska",
@@ -1326,6 +1363,10 @@ AVOutputFormat ff_matroska_muxer = {
     .write_trailer     = mkv_write_trailer,
     .flags             = AVFMT_GLOBALHEADER | AVFMT_VARIABLE_FPS |
                          AVFMT_TS_NONSTRICT,
+    .codec_tag         = (const AVCodecTag* const []){
+         ff_codec_bmp_tags, ff_codec_wav_tags,
+         additional_audio_tags, additional_video_tags, 0
+    },
     .subtitle_codec    = CODEC_ID_SSA,
     .query_codec       = mkv_query_codec,
 };
@@ -1365,5 +1406,8 @@ AVOutputFormat ff_matroska_audio_muxer = {
     .write_packet      = mkv_write_packet,
     .write_trailer     = mkv_write_trailer,
     .flags             = AVFMT_GLOBALHEADER | AVFMT_TS_NONSTRICT,
+    .codec_tag         = (const AVCodecTag* const []){
+        ff_codec_wav_tags, additional_audio_tags, 0
+    },
 };
 #endif

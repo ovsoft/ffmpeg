@@ -1173,6 +1173,7 @@ HAVE_LIST="
     dlfcn_h
     dlopen
     dos_paths
+    dxva_h
     ebp_available
     ebx_available
     exp2
@@ -1217,7 +1218,6 @@ HAVE_LIST="
     memalign
     mkstemp
     mmap
-    netinet_sctp_h
     PeekNamedPipe
     poll_h
     posix_memalign
@@ -1237,6 +1237,7 @@ HAVE_LIST="
     struct_addrinfo
     struct_ipv6_mreq
     struct_rusage_ru_maxrss
+    struct_sctp_event_subscribe
     struct_sockaddr_in6
     struct_sockaddr_sa_len
     struct_sockaddr_storage
@@ -1665,7 +1666,7 @@ mmst_protocol_deps="network"
 rtmp_protocol_deps="!librtmp_protocol"
 rtmp_protocol_select="tcp_protocol"
 rtp_protocol_select="udp_protocol"
-sctp_protocol_deps="network netinet_sctp_h"
+sctp_protocol_deps="network struct_sctp_event_subscribe"
 tcp_protocol_deps="network"
 tls_protocol_deps_any="openssl gnutls"
 tls_protocol_select="tcp_protocol"
@@ -3069,7 +3070,7 @@ if enabled network; then
     check_type netinet/in.h "struct sockaddr_in6"
     check_type "sys/types.h sys/socket.h" "struct sockaddr_storage"
     check_struct "sys/types.h sys/socket.h" "struct sockaddr" sa_len
-    check_header netinet/sctp.h
+    check_type netinet/sctp.h "struct sctp_event_subscribe"
     # Prefer arpa/inet.h over winsock2
     if check_header arpa/inet.h ; then
         check_func closesocket
@@ -3124,6 +3125,7 @@ check_func_headers windows.h VirtualAlloc
 check_func_headers glob.h glob
 
 check_header dlfcn.h
+check_header dxva.h
 check_header dxva2api.h -D_WIN32_WINNT=0x0600
 check_header libcrystalhd/libcrystalhd_if.h
 check_header malloc.h
@@ -3209,7 +3211,7 @@ enabled frei0r     && { check_header frei0r.h || die "ERROR: frei0r.h header not
 enabled gnutls     && require_pkg_config gnutls gnutls/gnutls.h gnutls_global_init
 enabled libaacplus && require  "libaacplus >= 2.0.0" aacplus.h aacplusEncOpen -laacplus
 enabled libass     && require_pkg_config libass ass/ass.h ass_library_init
-enabled libbluray  && require libbluray libbluray/bluray.h bd_open -lbluray
+enabled libbluray  && require_pkg_config libbluray libbluray/bluray.h bd_open
 enabled libcelt    && require libcelt celt/celt.h celt_decode -lcelt0 &&
                       { check_lib celt/celt.h celt_decoder_create_custom -lcelt0 ||
                         die "ERROR: libcelt version must be >= 0.11.0."; }
@@ -3288,7 +3290,14 @@ makeinfo --version > /dev/null 2>&1 && enable makeinfo  || disable makeinfo
 check_header linux/fb.h
 check_header linux/videodev.h
 check_header linux/videodev2.h
-check_struct linux/videodev2.h "struct v4l2_frmivalenum" discrete
+check_cc <<EOF && enable_safe struct_v4l2_frmivalenum_discrete
+#include <linux/videodev2.h>
+int main(void) {
+struct v4l2_frmsizeenum vfse;
+vfse.discrete.width = 0;
+return 0;
+}
+EOF
 
 check_header sys/videoio.h
 
@@ -3449,11 +3458,13 @@ elif enabled gcc; then
     check_cflags -fno-tree-vectorize
     check_cflags -Werror=implicit-function-declaration
     check_cflags -Werror=missing-prototypes
+    check_cflags -Werror=return-type
 elif enabled llvm_gcc; then
     check_cflags -mllvm -stack-alignment=16
 elif enabled clang; then
     check_cflags -mllvm -stack-alignment=16
     check_cflags -Qunused-arguments
+    check_cflags -Werror=return-type
 elif enabled armcc; then
     # 2523: use of inline assembler is deprecated
     add_cflags -W${armcc_opt},--diag_suppress=2523
