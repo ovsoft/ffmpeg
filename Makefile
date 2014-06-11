@@ -116,6 +116,7 @@ install: install-progs install-data
 endif
 
 install: install-libs install-headers
+	sh mkaddincludes.sh $(INCDIR)
 
 install-libs: install-libs-yes
 
@@ -146,10 +147,12 @@ clean::
 	$(RM) $(CLEANSUFFIXES:%=tools/%)
 	$(RM) coverage.info
 	$(RM) -r coverage-html
+	$(RM) -f dlllibfiles
 
 distclean::
 	$(RM) $(DISTCLEANSUFFIXES)
 	$(RM) config.* .version version.h libavutil/avconfig.h
+	$(RM) -f dlllibfiles
 
 config:
 	$(SRC_PATH)/configure $(value FFMPEG_CONFIGURATION)

@@ -1,0 +1,1 @@
+./configure --enable-memalign-hack --arch=x86 --target-os=mingw32 --cross-prefix=i686-w64-mingw32- --disable-ffprobe --disable-ffplay --build-suffix=-ovs-$(cat OVS_VERSION) --enable-shared --disable-static --prefix=$HOME/sdk/mingw-i686/ffmpeg-ovs-$(cat OVS_VERSION)
