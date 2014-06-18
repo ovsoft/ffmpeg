@@ -14,7 +14,7 @@ fi
 
 cat /dev/null > $INCLUDEDIR/inttypes.h
 cat /dev/null > $INCLUDEDIR/stdint.h
-cat /dev/null > $INCLUDEDIR/ffmpeg_link_msvc.h
+cat /dev/null > $INCLUDEDIR/ffmpeg_link_msvs.h
 cat <<EOF > $INCLUDEDIR/FFmpegOVS.wxs
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi" xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
@@ -24,7 +24,7 @@ cat <<EOF > $INCLUDEDIR/FFmpegOVS.wxs
 EOF
 
 for i in $(sort < dlllibfiles); do
-	echo "#pragma comment(lib, \"$i.lib\")" >> $INCLUDEDIR/ffmpeg_link_msvc.h
+	echo "#pragma comment(lib, \"$i.lib\")" >> $INCLUDEDIR/ffmpeg_link_msvs.h
 	d=$(echo $i | sed s/\\-/_/g)
 	echo "                <File Id=\"$d.dll\" Name=\"$i.dll\" Source=\"\$(env.FFMPEG_HOME)\\\\bin\\\\$i.dll\" Vital=\"yes\" />" >> $INCLUDEDIR/FFmpegOVS.wxs
 done
