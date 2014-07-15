@@ -13,7 +13,6 @@ if ! test -d "$INCLUDEDIR" ; then
 fi
 
 cat /dev/null > $INCLUDEDIR/inttypes.h
-cat /dev/null > $INCLUDEDIR/stdint.h
 cat /dev/null > $INCLUDEDIR/ffmpeg_link_msvs.h
 cat <<EOF > $INCLUDEDIR/FFmpegOVS.wxs
 <?xml version="1.0" encoding="UTF-8"?>
