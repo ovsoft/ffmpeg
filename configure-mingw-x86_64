@@ -1,0 +1,2 @@
+export PKG_CONFIG_PATH=$HOME/sdk/mingw-x86_64/pkgconfig
+./configure --enable-memalign-hack --arch=x86_64 --target-os=mingw32 --cross-prefix=x86_64-w64-mingw32- --disable-ffprobe --disable-ffplay --build-suffix=-ovs-$(cat OVS_VERSION) --enable-shared --disable-static --enable-libass --prefix=$HOME/sdk/mingw-x86_64/ffmpeg-ovs-$(cat OVS_VERSION)
