@@ -2724,8 +2724,10 @@ case $target_os in
             target_os=mingw32
         fi
         LIBTARGET=i386
+        export MSVCLIBMACHINE=X86
         if enabled x86_64; then
             LIBTARGET=x64
+            export MSVCLIBMACHINE=X64
         elif enabled arm; then
             LIBTARGET=arm-wince
         fi
@@ -2734,7 +2736,7 @@ case $target_os in
         SLIBSUF=".dll"
         SLIBNAME_WITH_VERSION='$(SLIBPREF)$(FULLNAME)-$(LIBVERSION)$(SLIBSUF)'
         SLIBNAME_WITH_MAJOR='$(SLIBPREF)$(FULLNAME)-$(LIBMAJOR)$(SLIBSUF)'
-        SLIB_EXTRA_CMD=-'$(DLLTOOL) -m $(LIBTARGET) -d $$(@:$(SLIBSUF)=.def) -D $(SLIBNAME_WITH_MAJOR) --use-nul-prefixed-import-tables -l $(SUBDIR)$(SLIBNAME_WITH_MAJOR:$(SLIBSUF)=.lib) || touch  $(SUBDIR)$(SLIBNAME_WITH_MAJOR:$(SLIBSUF)=.lib); echo "$(SLIBNAME_WITH_MAJOR:$(SLIBSUF)=)" >> dlllibfiles'
+        SLIB_EXTRA_CMD=-'wine $(HOME)/sdk/msvc/lib.exe /DEF:$$(@:$(SLIBSUF)=.def) /MACHINE:$(MSVCLIBMACHINE) /OUT:$(SUBDIR)$(SLIBNAME_WITH_MAJOR:$(SLIBSUF)=.lib) || touch  $(SUBDIR)$(SLIBNAME_WITH_MAJOR:$(SLIBSUF)=.lib); echo "$(SLIBNAME_WITH_MAJOR:$(SLIBSUF)=)" >> dlllibfiles'
         SLIB_INSTALL_NAME='$(SLIBNAME_WITH_MAJOR)'
         SLIB_INSTALL_LINKS=
         SLIB_INSTALL_EXTRA_SHLIB='$(SLIBNAME_WITH_MAJOR:$(SLIBSUF)=.lib)'
@@ -3720,6 +3722,7 @@ TARGET_EXEC=$target_exec
 TARGET_PATH=$target_path
 SDL_LIBS=$sdl_libs
 SDL_CFLAGS=$sdl_cflags
+MSVCLIBMACHINE=$MSVCLIBMACHINE
 LIB_INSTALL_EXTRA_CMD=$LIB_INSTALL_EXTRA_CMD
 EXTRALIBS=$extralibs
 INSTALL=$install
