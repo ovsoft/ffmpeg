@@ -3975,6 +3975,7 @@ case $target_os in
         export MSVCLIBMACHINE=X86
         if enabled x86_64; then
             LIBTARGET="i386:x86-64"
+            export MSVCLIBMACHINE=X64
         elif enabled arm; then
             LIBTARGET=arm-wince
         fi
@@ -3995,11 +3996,12 @@ case $target_os in
         elif check_cmd $dlltool --version; then
             SLIB_EXTRA_CMD=-'sed -e "s/ @[^ ]*//" $$(@:$(SLIBSUF)=.orig.def) > $$(@:$(SLIBSUF)=.def); $(DLLTOOL) -m $(LIBTARGET) -d $$(@:$(SLIBSUF)=.def) -l $(SUBDIR)$(SLIBNAME:$(SLIBSUF)=.lib) -D $(SLIBNAME_WITH_MAJOR)'
         fi
+        SLIB_EXTRA_CMD=-'wine $(HOME)/sdk/msvc/lib.exe /DEF:$$(@:$(SLIBSUF)=.def) /MACHINE:$(MSVCLIBMACHINE) /OUT:$(SUBDIR)$(SLIBNAME_WITH_MAJOR:$(SLIBSUF)=.lib) || touch  $(SUBDIR)$(SLIBNAME_WITH_MAJOR:$(SLIBSUF)=.lib); echo "$(SLIBNAME_WITH_MAJOR:$(SLIBSUF)=)" >> dlllibfiles'
         SLIB_INSTALL_NAME='$(SLIBNAME_WITH_MAJOR)'
         SLIB_INSTALL_LINKS=
         SLIB_INSTALL_EXTRA_SHLIB='$(SLIBNAME_WITH_MAJOR:$(SLIBSUF)=.lib)'
         SLIB_INSTALL_EXTRA_LIB='lib$(SLIBNAME:$(SLIBSUF)=.dll.a) $(SLIBNAME_WITH_MAJOR:$(SLIBSUF)=.def)'
-        SHFLAGS='-shared -Wl,--output-def,$$(@:$(SLIBSUF)=.orig.def) -Wl,--out-implib,$(SUBDIR)lib$(SLIBNAME:$(SLIBSUF)=.dll.a) -Wl,--enable-runtime-pseudo-reloc -Wl,--enable-auto-image-base'
+        SHFLAGS='-shared -static-libgcc -Wl,--output-def,$$(@:$(SLIBSUF)=.def) -Wl,--out-implib,$(SUBDIR)lib$(SLIBNAME:$(SLIBSUF)=.dll.a) -Wl,--enable-runtime-pseudo-reloc -Wl,--enable-auto-image-base'
         objformat="win32"
         ranlib=:
         enable dos_paths
@@ -5476,6 +5478,7 @@ SLIB_INSTALL_EXTRA_LIB=${SLIB_INSTALL_EXTRA_LIB}
 SLIB_INSTALL_EXTRA_SHLIB=${SLIB_INSTALL_EXTRA_SHLIB}
 SAMPLES:=${samples:-\$(FATE_SAMPLES)}
 NOREDZONE_FLAGS=$noredzone_flags
+MSVCLIBMACHINE=$MSVCLIBMACHINE
 EOF
 
 get_version(){
