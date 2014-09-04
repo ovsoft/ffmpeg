@@ -42,7 +42,7 @@ static int probe(AVProbeData *p)
         (AV_RL32(&p->buf[16]) != 16))
     return 0;
 
-    //We cant be sure that this is ACT and not regular WAV
+    //We can't be sure that this is ACT and not regular WAV
     if (p->buf_size<512)
         return 0;
 
@@ -90,7 +90,7 @@ static int read_header(AVFormatContext *s)
     st->codec->channels=1;
     avpriv_set_pts_info(st, 64, 1, 100);
 
-    st->codec->codec_id=CODEC_ID_G729;
+    st->codec->codec_id=AV_CODEC_ID_G729;
 
     avio_seek(pb, 257, SEEK_SET);
     msec=avio_rl16(pb);

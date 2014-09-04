@@ -1,24 +1,24 @@
 /*
  * Copyright (c) 2012 Mans Rullgard
  *
- * This file is part of Libav.
+ * This file is part of FFmpeg.
  *
- * Libav is free software; you can redistribute it and/or
+ * FFmpeg is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
  * version 2.1 of the License, or (at your option) any later version.
  *
- * Libav is distributed in the hope that it will be useful,
+ * FFmpeg is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public
- * License along with Libav; if not, write to the Free Software
+ * License along with FFmpeg; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include "asm.S"
+#include "libavutil/arm/asm.S"
 
 function ff_sbr_sum64x5_neon, export=1
         push            {lr}
@@ -307,8 +307,8 @@ function ff_sbr_hf_apply_noise_0_neon, export=1
         vmov.i32        d3,  #0
 .Lhf_apply_noise_0:
         push            {r4,lr}
+        movrelx         r4,  X(ff_sbr_noise_table)
         ldr             r12, [sp, #12]
-        movrel          r4,  X(ff_sbr_noise_table)
         add             r3,  r3,  #1
         bfc             r3,  #9,  #23
         sub             r12, r12, #1
@@ -355,8 +355,8 @@ function ff_sbr_hf_apply_noise_1_neon, export=1
         eor             lr,  r12, #1<<31
         vmov            d3,  r12, lr
 .Lhf_apply_noise_1:
+        movrelx         r4,  X(ff_sbr_noise_table)
         ldr             r12, [sp, #12]
-        movrel          r4,  X(ff_sbr_noise_table)
         add             r3,  r3,  #1
         bfc             r3,  #9,  #23
         sub             r12, r12, #1

@@ -135,17 +135,17 @@ static int read_header(AVFormatContext *s)
             AVStream *st = avformat_new_stream(s, NULL);
 
             if (!st)
-                return -1;
+                return AVERROR(ENOMEM);
 
             st->codec->codec_type = AVMEDIA_TYPE_DATA;
-            st->codec->codec_id   = CODEC_ID_FFMETADATA;
+            st->codec->codec_id   = AV_CODEC_ID_FFMETADATA;
 
             m = &st->metadata;
         } else if (!memcmp(line, ID_CHAPTER, strlen(ID_CHAPTER))) {
             AVChapter *ch = read_chapter(s);
 
             if (!ch)
-                return -1;
+                return AVERROR(ENOMEM);
 
             m = &ch->metadata;
         } else
@@ -168,7 +168,7 @@ static int read_packet(AVFormatContext *s, AVPacket *pkt)
 
 AVInputFormat ff_ffmetadata_demuxer = {
     .name        = "ffmetadata",
-    .long_name   = NULL_IF_CONFIG_SMALL("FFmpeg metadata in text format"),
+    .long_name   = NULL_IF_CONFIG_SMALL("FFmpeg metadata in text"),
     .read_probe  = probe,
     .read_header = read_header,
     .read_packet = read_packet,

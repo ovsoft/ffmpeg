@@ -23,6 +23,7 @@
 #include "common.h"
 #include "aes.h"
 #include "intreadwrite.h"
+#include "timer.h"
 
 typedef union {
     uint64_t u64[2];
@@ -40,6 +41,11 @@ typedef struct AVAES {
 } AVAES;
 
 const int av_aes_size= sizeof(AVAES);
+
+struct AVAES *av_aes_alloc(void)
+{
+    return av_mallocz(sizeof(struct AVAES));
+}
 
 static const uint8_t rcon[10] = {
   0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36

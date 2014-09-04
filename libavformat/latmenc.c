@@ -2,20 +2,20 @@
  * LATM/LOAS muxer
  * Copyright (c) 2011 Kieran Kunhya <kieran@kunhya.com>
  *
- * This file is part of Libav.
+ * This file is part of FFmpeg.
  *
- * Libav is free software; you can redistribute it and/or
+ * FFmpeg is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
  * version 2.1 of the License, or (at your option) any later version.
  *
- * Libav is distributed in the hope that it will be useful,
+ * FFmpeg is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public
- * License along with Libav; if not, write to the Free Software
+ * License along with FFmpeg; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
@@ -41,7 +41,7 @@ typedef struct {
 
 static const AVOption options[] = {
     {"smc-interval", "StreamMuxConfig interval.",
-     offsetof(LATMContext, mod), AV_OPT_TYPE_INT, {.dbl = 0x0014}, 0x0001, 0xffff, AV_OPT_FLAG_ENCODING_PARAM},
+     offsetof(LATMContext, mod), AV_OPT_TYPE_INT, {.i64 = 0x0014}, 0x0001, 0xffff, AV_OPT_FLAG_ENCODING_PARAM},
     {NULL},
 };
 
@@ -86,7 +86,7 @@ static int latm_write_header(AVFormatContext *s)
     LATMContext *ctx = s->priv_data;
     AVCodecContext *avctx = s->streams[0]->codec;
 
-    if (avctx->codec_id == CODEC_ID_AAC_LATM)
+    if (avctx->codec_id == AV_CODEC_ID_AAC_LATM)
         return 0;
 
     if (avctx->extradata_size > 0 &&
@@ -124,7 +124,7 @@ static void latm_write_frame_header(AVFormatContext *s, PutBitContext *bs)
 
             if (!ctx->channel_conf) {
                 GetBitContext gb;
-                init_get_bits(&gb, avctx->extradata, avctx->extradata_size * 8);
+                init_get_bits8(&gb, avctx->extradata, avctx->extradata_size);
                 skip_bits_long(&gb, ctx->off + 3);
                 avpriv_copy_pce_data(bs, &gb);
             }
@@ -149,13 +149,22 @@ static int latm_write_packet(AVFormatContext *s, AVPacket *pkt)
     int i, len;
     uint8_t loas_header[] = "\x56\xe0\x00";
 
-    if (s->streams[0]->codec->codec_id == CODEC_ID_AAC_LATM)
+    if (s->streams[0]->codec->codec_id == AV_CODEC_ID_AAC_LATM)
         return ff_raw_write_packet(s, pkt);
 
     if (pkt->size > 2 && pkt->data[0] == 0xff && (pkt->data[1] >> 4) == 0xf) {
         av_log(s, AV_LOG_ERROR, "ADTS header detected - ADTS will not be incorrectly muxed into LATM\n");
         return AVERROR_INVALIDDATA;
     }
+
+    if (!s->streams[0]->codec->extradata) {
+        if(pkt->size > 2 && pkt->data[0] == 0x56 && (pkt->data[1] >> 4) == 0xe &&
+            (AV_RB16(pkt->data + 1) & 0x1FFF) + 3 == pkt->size)
+            return ff_raw_write_packet(s, pkt);
+        else
+            return AVERROR_INVALIDDATA;
+    }
+
     if (pkt->size > 0x1fff)
         goto too_large;
 
@@ -213,9 +222,10 @@ AVOutputFormat ff_latm_muxer = {
     .mime_type      = "audio/MP4A-LATM",
     .extensions     = "latm,loas",
     .priv_data_size = sizeof(LATMContext),
-    .audio_codec    = CODEC_ID_AAC,
-    .video_codec    = CODEC_ID_NONE,
+    .audio_codec    = AV_CODEC_ID_AAC,
+    .video_codec    = AV_CODEC_ID_NONE,
     .write_header   = latm_write_header,
     .write_packet   = latm_write_packet,
     .priv_class     = &latm_muxer_class,
+    .flags          = AVFMT_NOTIMESTAMPS,
 };

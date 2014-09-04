@@ -28,8 +28,8 @@
 #ifndef AVCODEC_H264PRED_H
 #define AVCODEC_H264PRED_H
 
-#include "libavutil/common.h"
-#include "dsputil.h"
+#include <stddef.h>
+#include <stdint.h>
 
 /**
  * Prediction types
@@ -60,7 +60,7 @@
 #define VERT_VP8_PRED         10    ///< for VP8, #VERT_PRED is the average of
                                     ///< (left col+cur col x2+right col) / 4;
                                     ///< this is the "unaveraged" one
-#define HOR_VP8_PRED          11    ///< unaveraged version of #HOR_PRED, see
+#define HOR_VP8_PRED          14    ///< unaveraged version of #HOR_PRED, see
                                     ///< #VERT_VP8_PRED for details
 #define DC_127_PRED           12
 #define DC_129_PRED           13
@@ -90,21 +90,25 @@
  * Context for storing H.264 prediction functions
  */
 typedef struct H264PredContext {
-    void(*pred4x4[9 + 3 + 3])(uint8_t *src, const uint8_t *topright, int stride); //FIXME move to dsp?
-    void(*pred8x8l[9 + 3])(uint8_t *src, int topleft, int topright, int stride);
-    void(*pred8x8[4 + 3 + 4])(uint8_t *src, int stride);
-    void(*pred16x16[4 + 3 + 2])(uint8_t *src, int stride);
+    void(*pred4x4[9 + 3 + 3])(uint8_t *src, const uint8_t *topright,
+                              ptrdiff_t stride);
+    void(*pred8x8l[9 + 3])(uint8_t *src, int topleft, int topright,
+                           ptrdiff_t stride);
+    void(*pred8x8[4 + 3 + 4])(uint8_t *src, ptrdiff_t stride);
+    void(*pred16x16[4 + 3 + 2])(uint8_t *src, ptrdiff_t stride);
 
     void(*pred4x4_add[2])(uint8_t *pix /*align  4*/,
-                          const DCTELEM *block /*align 16*/, int stride);
+                          int16_t *block /*align 16*/, ptrdiff_t stride);
     void(*pred8x8l_add[2])(uint8_t *pix /*align  8*/,
-                           const DCTELEM *block /*align 16*/, int stride);
+                           int16_t *block /*align 16*/, ptrdiff_t stride);
+    void(*pred8x8l_filter_add[2])(uint8_t *pix /*align  8*/,
+                           int16_t *block /*align 16*/, int topleft, int topright, ptrdiff_t stride);
     void(*pred8x8_add[3])(uint8_t *pix /*align  8*/,
                           const int *block_offset,
-                          const DCTELEM *block /*align 16*/, int stride);
+                          int16_t *block /*align 16*/, ptrdiff_t stride);
     void(*pred16x16_add[3])(uint8_t *pix /*align 16*/,
                             const int *block_offset,
-                            const DCTELEM *block /*align 16*/, int stride);
+                            int16_t *block /*align 16*/, ptrdiff_t stride);
 } H264PredContext;
 
 void ff_h264_pred_init(H264PredContext *h, int codec_id,

@@ -5,20 +5,20 @@
  * Copyright (c) 2009 Kenan Gillet
  * Copyright (c) 2010 Martin Storsjo
  *
- * This file is part of Libav.
+ * This file is part of FFmpeg.
  *
- * Libav is free software; you can redistribute it and/or
+ * FFmpeg is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
  * version 2.1 of the License, or (at your option) any later version.
  *
- * Libav is distributed in the hope that it will be useful,
+ * FFmpeg is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public
- * License along with Libav; if not, write to the Free Software
+ * License along with FFmpeg; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
@@ -27,9 +27,11 @@
  * G.722 ADPCM audio encoder
  */
 
+#include "libavutil/avassert.h"
 #include "avcodec.h"
 #include "internal.h"
 #include "g722.h"
+#include "libavutil/common.h"
 
 #define FREEZE_INTERVAL 128
 
@@ -51,9 +53,6 @@ static av_cold int g722_encode_close(AVCodecContext *avctx)
         av_freep(&c->node_buf[i]);
         av_freep(&c->nodep_buf[i]);
     }
-#if FF_API_OLD_ENCODE_AUDIO
-    av_freep(&avctx->coded_frame);
-#endif
     return 0;
 }
 
@@ -121,14 +120,6 @@ static av_cold int g722_encode_init(AVCodecContext * avctx)
         }
     }
 
-#if FF_API_OLD_ENCODE_AUDIO
-    avctx->coded_frame = avcodec_alloc_frame();
-    if (!avctx->coded_frame) {
-        ret = AVERROR(ENOMEM);
-        goto error;
-    }
-#endif
-
     return 0;
 error:
     g722_encode_close(avctx);
@@ -195,7 +186,7 @@ static void g722_encode_trellis(G722Context *c, int trellis,
     for (i = 0; i < 2; i++) {
         nodes[i] = c->nodep_buf[i];
         nodes_next[i] = c->nodep_buf[i] + frontier;
-        memset(c->nodep_buf[i], 0, 2 * frontier * sizeof(*c->nodep_buf));
+        memset(c->nodep_buf[i], 0, 2 * frontier * sizeof(*c->nodep_buf[i]));
         nodes[i][0] = c->node_buf[i] + frontier;
         nodes[i][0]->ssd = 0;
         nodes[i][0]->path = 0;
@@ -246,7 +237,7 @@ static void g722_encode_trellis(G722Context *c, int trellis,
                     continue;\
                 if (heap_pos[index] < frontier) {\
                     pos = heap_pos[index]++;\
-                    assert(pathn[index] < FREEZE_INTERVAL * frontier);\
+                    av_assert2(pathn[index] < FREEZE_INTERVAL * frontier);\
                     node = nodes_next[index][pos] = next[index]++;\
                     node->path = pathn[index]++;\
                 } else {\
@@ -366,7 +357,7 @@ static int g722_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
     int nb_samples, out_size, ret;
 
     out_size = (frame->nb_samples + 1) / 2;
-    if ((ret = ff_alloc_packet2(avctx, avpkt, out_size)))
+    if ((ret = ff_alloc_packet2(avctx, avpkt, out_size)) < 0)
         return ret;
 
     nb_samples = frame->nb_samples - (frame->nb_samples & 1);
@@ -390,14 +381,14 @@ static int g722_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
 
 AVCodec ff_adpcm_g722_encoder = {
     .name           = "g722",
+    .long_name      = NULL_IF_CONFIG_SMALL("G.722 ADPCM"),
     .type           = AVMEDIA_TYPE_AUDIO,
-    .id             = CODEC_ID_ADPCM_G722,
+    .id             = AV_CODEC_ID_ADPCM_G722,
     .priv_data_size = sizeof(G722Context),
     .init           = g722_encode_init,
     .close          = g722_encode_close,
     .encode2        = g722_encode_frame,
     .capabilities   = CODEC_CAP_SMALL_LAST_FRAME,
-    .long_name      = NULL_IF_CONFIG_SMALL("G.722 ADPCM"),
     .sample_fmts    = (const enum AVSampleFormat[]){ AV_SAMPLE_FMT_S16,
                                                      AV_SAMPLE_FMT_NONE },
 };

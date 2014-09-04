@@ -77,7 +77,7 @@ CONV_FUNC(AV_SAMPLE_FMT_S32, int32_t, AV_SAMPLE_FMT_DBL, av_clipl_int32(llrint(*
 CONV_FUNC(AV_SAMPLE_FMT_FLT, float  , AV_SAMPLE_FMT_DBL, *(const double*)pi)
 CONV_FUNC(AV_SAMPLE_FMT_DBL, double , AV_SAMPLE_FMT_DBL, *(const double*)pi)
 
-#define FMT_PAIR_FUNC(out, in) [out + AV_SAMPLE_FMT_NB*in] = CONV_FUNC_NAME(out, in)
+#define FMT_PAIR_FUNC(out, in) [(out) + AV_SAMPLE_FMT_NB*(in)] = CONV_FUNC_NAME(out, in)
 
 static conv_func_type * const fmt_pair_to_conv_functions[AV_SAMPLE_FMT_NB*AV_SAMPLE_FMT_NB] = {
     FMT_PAIR_FUNC(AV_SAMPLE_FMT_U8 , AV_SAMPLE_FMT_U8 ),
@@ -155,6 +155,7 @@ AudioConvert *swri_audio_convert_alloc(enum AVSampleFormat out_fmt,
     }
 
     if(HAVE_YASM && HAVE_MMX) swri_audio_convert_init_x86(ctx, out_fmt, in_fmt, channels);
+    if(ARCH_ARM)              swri_audio_convert_init_arm(ctx, out_fmt, in_fmt, channels);
 
     return ctx;
 }
@@ -169,23 +170,40 @@ int swri_audio_convert(AudioConvert *ctx, AudioData *out, AudioData *in, int len
     int ch;
     int off=0;
     const int os= (out->planar ? 1 :out->ch_count) *out->bps;
+    unsigned misaligned = 0;
 
     av_assert0(ctx->channels == out->ch_count);
 
+    if (ctx->in_simd_align_mask) {
+        int planes = in->planar ? in->ch_count : 1;
+        unsigned m = 0;
+        for (ch = 0; ch < planes; ch++)
+            m |= (intptr_t)in->ch[ch];
+        misaligned |= m & ctx->in_simd_align_mask;
+    }
+    if (ctx->out_simd_align_mask) {
+        int planes = out->planar ? out->ch_count : 1;
+        unsigned m = 0;
+        for (ch = 0; ch < planes; ch++)
+            m |= (intptr_t)out->ch[ch];
+        misaligned |= m & ctx->out_simd_align_mask;
+    }
+
     //FIXME optimize common cases
 
-    if(ctx->simd_f && !ctx->ch_map){
-        off = len/16 * 16;
+    if(ctx->simd_f && !ctx->ch_map && !misaligned){
+        off = len&~15;
         av_assert1(off>=0);
         av_assert1(off<=len);
+        av_assert2(ctx->channels == SWR_CH_MAX || !in->ch[ctx->channels]);
         if(off>0){
             if(out->planar == in->planar){
                 int planes = out->planar ? out->ch_count : 1;
                 for(ch=0; ch<planes; ch++){
-                    ctx->simd_f(out->ch+ch, in->ch+ch, off * (out->planar ? 1 :out->ch_count));
+                    ctx->simd_f(out->ch+ch, (const uint8_t **)in->ch+ch, off * (out->planar ? 1 :out->ch_count));
                 }
             }else{
-                ctx->simd_f(out->ch, in->ch, off);
+                ctx->simd_f(out->ch, (const uint8_t **)in->ch, off);
             }
         }
         if(off == len)

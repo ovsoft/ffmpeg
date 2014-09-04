@@ -32,7 +32,9 @@
 #include "libavutil/fifo.h"
 #include "libavutil/intreadwrite.h"
 #include "libavutil/avstring.h"
-#include <unistd.h>
+#include "libavutil/opt.h"
+#include "libavutil/log.h"
+#include "libavutil/time.h"
 #include "internal.h"
 #include "network.h"
 #include "os_support.h"
@@ -42,7 +44,9 @@
 #include <pthread.h>
 #endif
 
-#include <sys/time.h>
+#ifndef HAVE_PTHREAD_CANCEL
+#define HAVE_PTHREAD_CANCEL 0
+#endif
 
 #ifndef IPV6_ADD_MEMBERSHIP
 #define IPV6_ADD_MEMBERSHIP IPV6_JOIN_GROUP
@@ -53,10 +57,12 @@
 #define UDP_MAX_PKT_SIZE 65536
 
 typedef struct {
+    const AVClass *class;
     int udp_fd;
     int ttl;
     int buffer_size;
     int is_multicast;
+    int is_broadcast;
     int local_port;
     int reuse_socket;
     int overrun_nonfatal;
@@ -76,7 +82,44 @@ typedef struct {
 #endif
     uint8_t tmp[UDP_MAX_PKT_SIZE+4];
     int remaining_in_dg;
+    char *local_addr;
+    int packet_size;
+    int timeout;
+    struct sockaddr_storage local_addr_storage;
 } UDPContext;
+
+#define OFFSET(x) offsetof(UDPContext, x)
+#define D AV_OPT_FLAG_DECODING_PARAM
+#define E AV_OPT_FLAG_ENCODING_PARAM
+static const AVOption options[] = {
+{"buffer_size", "set packet buffer size in bytes", OFFSET(buffer_size), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, D|E },
+{"localport", "set local port to bind to", OFFSET(local_port), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, D|E },
+{"localaddr", "choose local IP address", OFFSET(local_addr), AV_OPT_TYPE_STRING, {.str = ""}, 0, 0, D|E },
+{"pkt_size", "set size of UDP packets", OFFSET(packet_size), AV_OPT_TYPE_INT, {.i64 = 1472}, 0, INT_MAX, D|E },
+{"reuse", "explicitly allow or disallow reusing UDP sockets", OFFSET(reuse_socket), AV_OPT_TYPE_INT, {.i64 = 0}, 0, 1, D|E },
+{"broadcast", "explicitly allow or disallow broadcast destination", OFFSET(is_broadcast), AV_OPT_TYPE_INT, {.i64 = 0}, 0, 1, E },
+{"ttl", "set the time to live value (for multicast only)", OFFSET(ttl), AV_OPT_TYPE_INT, {.i64 = 16}, 0, INT_MAX, E },
+{"connect", "set if connect() should be called on socket", OFFSET(is_connected), AV_OPT_TYPE_INT, {.i64 = 0}, 0, 1, D|E },
+/* TODO 'sources', 'block' option */
+{"fifo_size", "set the UDP receiving circular buffer size, expressed as a number of packets with size of 188 bytes", OFFSET(circular_buffer_size), AV_OPT_TYPE_INT, {.i64 = 7*4096}, 0, INT_MAX, D },
+{"overrun_nonfatal", "survive in case of UDP receiving circular buffer overrun", OFFSET(overrun_nonfatal), AV_OPT_TYPE_INT, {.i64 = 0}, 0, 1, D },
+{"timeout", "set raise error timeout (only in read mode)", OFFSET(timeout), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, D },
+{NULL}
+};
+
+static const AVClass udp_context_class = {
+    .class_name     = "udp",
+    .item_name      = av_default_item_name,
+    .option         = options,
+    .version        = LIBAVUTIL_VERSION_INT,
+};
+
+static void log_net_error(void *ctx, int level, const char* prefix)
+{
+    char errbuf[100];
+    av_strerror(ff_neterrno(), errbuf, sizeof(errbuf));
+    av_log(ctx, level, "%s: %s\n", prefix, errbuf);
+}
 
 static int udp_set_multicast_ttl(int sockfd, int mcastTTL,
                                  struct sockaddr *addr)
@@ -84,7 +127,7 @@ static int udp_set_multicast_ttl(int sockfd, int mcastTTL,
 #ifdef IP_MULTICAST_TTL
     if (addr->sa_family == AF_INET) {
         if (setsockopt(sockfd, IPPROTO_IP, IP_MULTICAST_TTL, &mcastTTL, sizeof(mcastTTL)) < 0) {
-            av_log(NULL, AV_LOG_ERROR, "setsockopt(IP_MULTICAST_TTL): %s\n", strerror(errno));
+            log_net_error(NULL, AV_LOG_ERROR, "setsockopt(IP_MULTICAST_TTL)");
             return -1;
         }
     }
@@ -92,7 +135,7 @@ static int udp_set_multicast_ttl(int sockfd, int mcastTTL,
 #if defined(IPPROTO_IPV6) && defined(IPV6_MULTICAST_HOPS)
     if (addr->sa_family == AF_INET6) {
         if (setsockopt(sockfd, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, &mcastTTL, sizeof(mcastTTL)) < 0) {
-            av_log(NULL, AV_LOG_ERROR, "setsockopt(IPV6_MULTICAST_HOPS): %s\n", strerror(errno));
+            log_net_error(NULL, AV_LOG_ERROR, "setsockopt(IPV6_MULTICAST_HOPS)");
             return -1;
         }
     }
@@ -100,16 +143,19 @@ static int udp_set_multicast_ttl(int sockfd, int mcastTTL,
     return 0;
 }
 
-static int udp_join_multicast_group(int sockfd, struct sockaddr *addr)
+static int udp_join_multicast_group(int sockfd, struct sockaddr *addr,struct sockaddr *local_addr)
 {
 #ifdef IP_ADD_MEMBERSHIP
     if (addr->sa_family == AF_INET) {
         struct ip_mreq mreq;
 
         mreq.imr_multiaddr.s_addr = ((struct sockaddr_in *)addr)->sin_addr.s_addr;
-        mreq.imr_interface.s_addr= INADDR_ANY;
+        if (local_addr)
+            mreq.imr_interface= ((struct sockaddr_in *)local_addr)->sin_addr;
+        else
+            mreq.imr_interface.s_addr= INADDR_ANY;
         if (setsockopt(sockfd, IPPROTO_IP, IP_ADD_MEMBERSHIP, (const void *)&mreq, sizeof(mreq)) < 0) {
-            av_log(NULL, AV_LOG_ERROR, "setsockopt(IP_ADD_MEMBERSHIP): %s\n", strerror(errno));
+            log_net_error(NULL, AV_LOG_ERROR, "setsockopt(IP_ADD_MEMBERSHIP)");
             return -1;
         }
     }
@@ -121,7 +167,7 @@ static int udp_join_multicast_group(int sockfd, struct sockaddr *addr)
         memcpy(&mreq6.ipv6mr_multiaddr, &(((struct sockaddr_in6 *)addr)->sin6_addr), sizeof(struct in6_addr));
         mreq6.ipv6mr_interface= 0;
         if (setsockopt(sockfd, IPPROTO_IPV6, IPV6_ADD_MEMBERSHIP, &mreq6, sizeof(mreq6)) < 0) {
-            av_log(NULL, AV_LOG_ERROR, "setsockopt(IPV6_ADD_MEMBERSHIP): %s\n", strerror(errno));
+            log_net_error(NULL, AV_LOG_ERROR, "setsockopt(IPV6_ADD_MEMBERSHIP)");
             return -1;
         }
     }
@@ -129,16 +175,19 @@ static int udp_join_multicast_group(int sockfd, struct sockaddr *addr)
     return 0;
 }
 
-static int udp_leave_multicast_group(int sockfd, struct sockaddr *addr)
+static int udp_leave_multicast_group(int sockfd, struct sockaddr *addr,struct sockaddr *local_addr)
 {
 #ifdef IP_DROP_MEMBERSHIP
     if (addr->sa_family == AF_INET) {
         struct ip_mreq mreq;
 
         mreq.imr_multiaddr.s_addr = ((struct sockaddr_in *)addr)->sin_addr.s_addr;
-        mreq.imr_interface.s_addr= INADDR_ANY;
+        if (local_addr)
+            mreq.imr_interface= ((struct sockaddr_in *)local_addr)->sin_addr;
+        else
+            mreq.imr_interface.s_addr= INADDR_ANY;
         if (setsockopt(sockfd, IPPROTO_IP, IP_DROP_MEMBERSHIP, (const void *)&mreq, sizeof(mreq)) < 0) {
-            av_log(NULL, AV_LOG_ERROR, "setsockopt(IP_DROP_MEMBERSHIP): %s\n", strerror(errno));
+            log_net_error(NULL, AV_LOG_ERROR, "setsockopt(IP_DROP_MEMBERSHIP)");
             return -1;
         }
     }
@@ -150,7 +199,7 @@ static int udp_leave_multicast_group(int sockfd, struct sockaddr *addr)
         memcpy(&mreq6.ipv6mr_multiaddr, &(((struct sockaddr_in6 *)addr)->sin6_addr), sizeof(struct in6_addr));
         mreq6.ipv6mr_interface= 0;
         if (setsockopt(sockfd, IPPROTO_IPV6, IPV6_DROP_MEMBERSHIP, &mreq6, sizeof(mreq6)) < 0) {
-            av_log(NULL, AV_LOG_ERROR, "setsockopt(IPV6_DROP_MEMBERSHIP): %s\n", strerror(errno));
+            log_net_error(NULL, AV_LOG_ERROR, "setsockopt(IPV6_DROP_MEMBERSHIP)");
             return -1;
         }
     }
@@ -184,6 +233,79 @@ static struct addrinfo* udp_resolve_host(const char *hostname, int port,
     return res;
 }
 
+static int udp_set_multicast_sources(int sockfd, struct sockaddr *addr,
+                                     int addr_len, char **sources,
+                                     int nb_sources, int include)
+{
+#if HAVE_STRUCT_GROUP_SOURCE_REQ && defined(MCAST_BLOCK_SOURCE) && !defined(_WIN32)
+    /* These ones are available in the microsoft SDK, but don't seem to work
+     * as on linux, so just prefer the v4-only approach there for now. */
+    int i;
+    for (i = 0; i < nb_sources; i++) {
+        struct group_source_req mreqs;
+        int level = addr->sa_family == AF_INET ? IPPROTO_IP : IPPROTO_IPV6;
+        struct addrinfo *sourceaddr = udp_resolve_host(sources[i], 0,
+                                                       SOCK_DGRAM, AF_UNSPEC,
+                                                       0);
+        if (!sourceaddr)
+            return AVERROR(ENOENT);
+
+        mreqs.gsr_interface = 0;
+        memcpy(&mreqs.gsr_group, addr, addr_len);
+        memcpy(&mreqs.gsr_source, sourceaddr->ai_addr, sourceaddr->ai_addrlen);
+        freeaddrinfo(sourceaddr);
+
+        if (setsockopt(sockfd, level,
+                       include ? MCAST_JOIN_SOURCE_GROUP : MCAST_BLOCK_SOURCE,
+                       (const void *)&mreqs, sizeof(mreqs)) < 0) {
+            if (include)
+                log_net_error(NULL, AV_LOG_ERROR, "setsockopt(MCAST_JOIN_SOURCE_GROUP)");
+            else
+                log_net_error(NULL, AV_LOG_ERROR, "setsockopt(MCAST_BLOCK_SOURCE)");
+            return ff_neterrno();
+        }
+    }
+#elif HAVE_STRUCT_IP_MREQ_SOURCE && defined(IP_BLOCK_SOURCE)
+    int i;
+    if (addr->sa_family != AF_INET) {
+        av_log(NULL, AV_LOG_ERROR,
+               "Setting multicast sources only supported for IPv4\n");
+        return AVERROR(EINVAL);
+    }
+    for (i = 0; i < nb_sources; i++) {
+        struct ip_mreq_source mreqs;
+        struct addrinfo *sourceaddr = udp_resolve_host(sources[i], 0,
+                                                       SOCK_DGRAM, AF_UNSPEC,
+                                                       0);
+        if (!sourceaddr)
+            return AVERROR(ENOENT);
+        if (sourceaddr->ai_addr->sa_family != AF_INET) {
+            freeaddrinfo(sourceaddr);
+            av_log(NULL, AV_LOG_ERROR, "%s is of incorrect protocol family\n",
+                   sources[i]);
+            return AVERROR(EINVAL);
+        }
+
+        mreqs.imr_multiaddr.s_addr = ((struct sockaddr_in *)addr)->sin_addr.s_addr;
+        mreqs.imr_interface.s_addr = INADDR_ANY;
+        mreqs.imr_sourceaddr.s_addr = ((struct sockaddr_in *)sourceaddr->ai_addr)->sin_addr.s_addr;
+        freeaddrinfo(sourceaddr);
+
+        if (setsockopt(sockfd, IPPROTO_IP,
+                       include ? IP_ADD_SOURCE_MEMBERSHIP : IP_BLOCK_SOURCE,
+                       (const void *)&mreqs, sizeof(mreqs)) < 0) {
+            if (include)
+                log_net_error(NULL, AV_LOG_ERROR, "setsockopt(IP_ADD_SOURCE_MEMBERSHIP)");
+            else
+                log_net_error(NULL, AV_LOG_ERROR, "setsockopt(IP_BLOCK_SOURCE)");
+            return ff_neterrno();
+        }
+    }
+#else
+    return AVERROR(ENOSYS);
+#endif
+    return 0;
+}
 static int udp_set_url(struct sockaddr_storage *addr,
                        const char *hostname, int port)
 {
@@ -200,7 +322,7 @@ static int udp_set_url(struct sockaddr_storage *addr,
 }
 
 static int udp_socket_create(UDPContext *s, struct sockaddr_storage *addr,
-                             int *addr_len, const char *localaddr)
+                             socklen_t *addr_len, const char *localaddr)
 {
     int udp_fd = -1;
     struct addrinfo *res0 = NULL, *res = NULL;
@@ -213,9 +335,9 @@ static int udp_socket_create(UDPContext *s, struct sockaddr_storage *addr,
     if (res0 == 0)
         goto fail;
     for (res = res0; res; res=res->ai_next) {
-        udp_fd = socket(res->ai_family, SOCK_DGRAM, 0);
-        if (udp_fd > 0) break;
-        av_log(NULL, AV_LOG_ERROR, "socket: %s\n", strerror(errno));
+        udp_fd = ff_socket(res->ai_family, SOCK_DGRAM, 0);
+        if (udp_fd != -1) break;
+        log_net_error(NULL, AV_LOG_ERROR, "socket");
     }
 
     if (udp_fd < 0)
@@ -239,9 +361,10 @@ static int udp_socket_create(UDPContext *s, struct sockaddr_storage *addr,
 static int udp_port(struct sockaddr_storage *addr, int addr_len)
 {
     char sbuf[sizeof(int)*3+1];
+    int error;
 
-    if (getnameinfo((struct sockaddr *)addr, addr_len, NULL, 0,  sbuf, sizeof(sbuf), NI_NUMERICSERV) != 0) {
-        av_log(NULL, AV_LOG_ERROR, "getnameinfo: %s\n", strerror(errno));
+    if ((error = getnameinfo((struct sockaddr *)addr, addr_len, NULL, 0,  sbuf, sizeof(sbuf), NI_NUMERICSERV)) != 0) {
+        av_log(NULL, AV_LOG_ERROR, "getnameinfo: %s\n", gai_strerror(error));
         return -1;
     }
 
@@ -289,7 +412,7 @@ int ff_udp_set_remote_url(URLContext *h, const char *uri)
                 if (connect(s->udp_fd, (struct sockaddr *) &s->dest_addr,
                             s->dest_addr_len)) {
                     s->is_connected = 0;
-                    av_log(h, AV_LOG_ERROR, "connect: %s\n", strerror(errno));
+                    log_net_error(h, AV_LOG_ERROR, "connect");
                     return AVERROR(EIO);
                 }
             }
@@ -329,8 +452,12 @@ static void *circular_buffer_task( void *_URLContext)
     int old_cancelstate;
 
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &old_cancelstate);
-    ff_socket_nonblock(s->udp_fd, 0);
     pthread_mutex_lock(&s->mutex);
+    if (ff_socket_nonblock(s->udp_fd, 0) < 0) {
+        av_log(h, AV_LOG_ERROR, "Failed to set blocking mode");
+        s->circular_buffer_error = AVERROR(EIO);
+        goto end;
+    }
     while(1) {
         int len;
 
@@ -376,6 +503,27 @@ end:
 }
 #endif
 
+static int parse_source_list(char *buf, char **sources, int *num_sources,
+                             int max_sources)
+{
+    char *source_start;
+
+    source_start = buf;
+    while (1) {
+        char *next = strchr(source_start, ',');
+        if (next)
+            *next = '\0';
+        sources[*num_sources] = av_strdup(source_start);
+        if (!sources[*num_sources])
+            return AVERROR(ENOMEM);
+        source_start = next + 1;
+        (*num_sources)++;
+        if (*num_sources >= max_sources || !next)
+            break;
+    }
+    return 0;
+}
+
 /* put it in UDP context */
 /* return non zero if error */
 static int udp_open(URLContext *h, const char *uri, int flags)
@@ -387,18 +535,16 @@ static int udp_open(URLContext *h, const char *uri, int flags)
     const char *p;
     char buf[256];
     struct sockaddr_storage my_addr;
-    int len;
+    socklen_t len;
     int reuse_specified = 0;
+    int i, num_include_sources = 0, num_exclude_sources = 0;
+    char *include_sources[32], *exclude_sources[32];
 
     h->is_streamed = 1;
-    h->max_packet_size = 1472;
 
     is_output = !(flags & AVIO_FLAG_READ);
-
-    s->ttl = 16;
-    s->buffer_size = is_output ? UDP_TX_BUF_SIZE : UDP_MAX_PKT_SIZE;
-
-    s->circular_buffer_size = 7*188*4096;
+    if (!s->buffer_size) /* if not set explicitly */
+        s->buffer_size = is_output ? UDP_TX_BUF_SIZE : UDP_MAX_PKT_SIZE;
 
     p = strchr(uri, '?');
     if (p) {
@@ -416,6 +562,10 @@ static int udp_open(URLContext *h, const char *uri, int flags)
             /* assume if no digits were found it is a request to enable it */
             if (buf == endptr)
                 s->overrun_nonfatal = 1;
+            if (!HAVE_PTHREAD_CANCEL)
+                av_log(h, AV_LOG_WARNING,
+                       "'overrun_nonfatal' option was set but it is not supported "
+                       "on this build (pthread support is required)\n");
         }
         if (av_find_info_tag(buf, sizeof(buf), "ttl", p)) {
             s->ttl = strtol(buf, NULL, 10);
@@ -424,7 +574,7 @@ static int udp_open(URLContext *h, const char *uri, int flags)
             s->local_port = strtol(buf, NULL, 10);
         }
         if (av_find_info_tag(buf, sizeof(buf), "pkt_size", p)) {
-            h->max_packet_size = strtol(buf, NULL, 10);
+            s->packet_size = strtol(buf, NULL, 10);
         }
         if (av_find_info_tag(buf, sizeof(buf), "buffer_size", p)) {
             s->buffer_size = strtol(buf, NULL, 10);
@@ -433,12 +583,38 @@ static int udp_open(URLContext *h, const char *uri, int flags)
             s->is_connected = strtol(buf, NULL, 10);
         }
         if (av_find_info_tag(buf, sizeof(buf), "fifo_size", p)) {
-            s->circular_buffer_size = strtol(buf, NULL, 10)*188;
+            s->circular_buffer_size = strtol(buf, NULL, 10);
+            if (!HAVE_PTHREAD_CANCEL)
+                av_log(h, AV_LOG_WARNING,
+                       "'circular_buffer_size' option was set but it is not supported "
+                       "on this build (pthread support is required)\n");
         }
         if (av_find_info_tag(buf, sizeof(buf), "localaddr", p)) {
             av_strlcpy(localaddr, buf, sizeof(localaddr));
         }
+        if (av_find_info_tag(buf, sizeof(buf), "sources", p)) {
+            if (parse_source_list(buf, include_sources, &num_include_sources,
+                                  FF_ARRAY_ELEMS(include_sources)))
+                goto fail;
+        }
+        if (av_find_info_tag(buf, sizeof(buf), "block", p)) {
+            if (parse_source_list(buf, exclude_sources, &num_exclude_sources,
+                                  FF_ARRAY_ELEMS(exclude_sources)))
+                goto fail;
+        }
+        if (!is_output && av_find_info_tag(buf, sizeof(buf), "timeout", p))
+            s->timeout = strtol(buf, NULL, 10);
+        if (is_output && av_find_info_tag(buf, sizeof(buf), "broadcast", p))
+            s->is_broadcast = strtol(buf, NULL, 10);
     }
+    /* handling needed to support options picking from both AVOption and URL */
+    s->circular_buffer_size *= 188;
+    if (flags & AVIO_FLAG_WRITE) {
+        h->max_packet_size = s->packet_size;
+    } else {
+        h->max_packet_size = UDP_MAX_PKT_SIZE;
+    }
+    h->rw_timeout = s->timeout;
 
     /* fill the dest addr */
     av_url_split(NULL, 0, NULL, 0, hostname, sizeof(hostname), &port, NULL, 0, uri);
@@ -455,9 +631,11 @@ static int udp_open(URLContext *h, const char *uri, int flags)
 
     if ((s->is_multicast || !s->local_port) && (h->flags & AVIO_FLAG_READ))
         s->local_port = port;
-    udp_fd = udp_socket_create(s, &my_addr, &len, localaddr);
+    udp_fd = udp_socket_create(s, &my_addr, &len, localaddr[0] ? localaddr : s->local_addr);
     if (udp_fd < 0)
         goto fail;
+
+    s->local_addr_storage=my_addr; //store for future multicast join
 
     /* Follow the requested reuse option, unless it's multicast in which
      * case enable reuse unless explicitly disabled.
@@ -466,6 +644,13 @@ static int udp_open(URLContext *h, const char *uri, int flags)
         s->reuse_socket = 1;
         if (setsockopt (udp_fd, SOL_SOCKET, SO_REUSEADDR, &(s->reuse_socket), sizeof(s->reuse_socket)) != 0)
             goto fail;
+    }
+
+    if (s->is_broadcast) {
+#ifdef SO_BROADCAST
+        if (setsockopt (udp_fd, SOL_SOCKET, SO_BROADCAST, &(s->is_broadcast), sizeof(s->is_broadcast)) != 0)
+#endif
+           goto fail;
     }
 
     /* If multicast, try binding the multicast address first, to avoid
@@ -479,7 +664,7 @@ static int udp_open(URLContext *h, const char *uri, int flags)
      * bind failed */
     /* the bind is needed to give a port to the socket now */
     if (bind_ret < 0 && bind(udp_fd,(struct sockaddr *)&my_addr, len) < 0) {
-        av_log(h, AV_LOG_ERROR, "bind failed: %s\n", strerror(errno));
+        log_net_error(h, AV_LOG_ERROR, "bind failed");
         goto fail;
     }
 
@@ -495,8 +680,21 @@ static int udp_open(URLContext *h, const char *uri, int flags)
         }
         if (h->flags & AVIO_FLAG_READ) {
             /* input */
-            if (udp_join_multicast_group(udp_fd, (struct sockaddr *)&s->dest_addr) < 0)
+            if (num_include_sources && num_exclude_sources) {
+                av_log(h, AV_LOG_ERROR, "Simultaneously including and excluding multicast sources is not supported\n");
                 goto fail;
+            }
+            if (num_include_sources) {
+                if (udp_set_multicast_sources(udp_fd, (struct sockaddr *)&s->dest_addr, s->dest_addr_len, include_sources, num_include_sources, 1) < 0)
+                    goto fail;
+            } else {
+                if (udp_join_multicast_group(udp_fd, (struct sockaddr *)&s->dest_addr,(struct sockaddr *)&s->local_addr_storage) < 0)
+                    goto fail;
+            }
+            if (num_exclude_sources) {
+                if (udp_set_multicast_sources(udp_fd, (struct sockaddr *)&s->dest_addr, s->dest_addr_len, exclude_sources, num_exclude_sources, 0) < 0)
+                    goto fail;
+            }
         }
     }
 
@@ -504,25 +702,38 @@ static int udp_open(URLContext *h, const char *uri, int flags)
         /* limit the tx buf size to limit latency */
         tmp = s->buffer_size;
         if (setsockopt(udp_fd, SOL_SOCKET, SO_SNDBUF, &tmp, sizeof(tmp)) < 0) {
-            av_log(h, AV_LOG_ERROR, "setsockopt(SO_SNDBUF): %s\n", strerror(errno));
+            log_net_error(h, AV_LOG_ERROR, "setsockopt(SO_SNDBUF)");
             goto fail;
         }
     } else {
-        /* set udp recv buffer size to the largest possible udp packet size to
-         * avoid losing data on OSes that set this too low by default. */
+        /* set udp recv buffer size to the requested value (default 64K) */
         tmp = s->buffer_size;
         if (setsockopt(udp_fd, SOL_SOCKET, SO_RCVBUF, &tmp, sizeof(tmp)) < 0) {
-            av_log(h, AV_LOG_WARNING, "setsockopt(SO_RECVBUF): %s\n", strerror(errno));
+            log_net_error(h, AV_LOG_WARNING, "setsockopt(SO_RECVBUF)");
         }
+        len = sizeof(tmp);
+        if (getsockopt(udp_fd, SOL_SOCKET, SO_RCVBUF, &tmp, &len) < 0) {
+            log_net_error(h, AV_LOG_WARNING, "getsockopt(SO_RCVBUF)");
+        } else {
+            av_log(h, AV_LOG_DEBUG, "end receive buffer size reported is %d\n", tmp);
+            if(tmp < s->buffer_size)
+                av_log(h, AV_LOG_WARNING, "attempted to set receive buffer to size %d but it only ended up set as %d", s->buffer_size, tmp);
+        }
+
         /* make the socket non-blocking */
         ff_socket_nonblock(udp_fd, 1);
     }
     if (s->is_connected) {
         if (connect(udp_fd, (struct sockaddr *) &s->dest_addr, s->dest_addr_len)) {
-            av_log(h, AV_LOG_ERROR, "connect: %s\n", strerror(errno));
+            log_net_error(h, AV_LOG_ERROR, "connect");
             goto fail;
         }
     }
+
+    for (i = 0; i < num_include_sources; i++)
+        av_freep(&include_sources[i]);
+    for (i = 0; i < num_exclude_sources; i++)
+        av_freep(&exclude_sources[i]);
 
     s->udp_fd = udp_fd;
 
@@ -561,7 +772,11 @@ static int udp_open(URLContext *h, const char *uri, int flags)
  fail:
     if (udp_fd >= 0)
         closesocket(udp_fd);
-    av_fifo_free(s->fifo);
+    av_fifo_freep(&s->fifo);
+    for (i = 0; i < num_include_sources; i++)
+        av_freep(&include_sources[i]);
+    for (i = 0; i < num_exclude_sources; i++)
+        av_freep(&exclude_sources[i]);
     return AVERROR(EIO);
 }
 
@@ -604,8 +819,10 @@ static int udp_read(URLContext *h, uint8_t *buf, int size)
                 int64_t t = av_gettime() + 100000;
                 struct timespec tv = { .tv_sec  =  t / 1000000,
                                        .tv_nsec = (t % 1000000) * 1000 };
-                if (pthread_cond_timedwait(&s->cond, &s->mutex, &tv) < 0)
+                if (pthread_cond_timedwait(&s->cond, &s->mutex, &tv) < 0) {
+                    pthread_mutex_unlock(&s->mutex);
                     return AVERROR(errno == ETIMEDOUT ? EAGAIN : errno);
+                }
                 nonblock = 1;
             }
         } while( 1);
@@ -649,20 +866,19 @@ static int udp_close(URLContext *h)
     int ret;
 
     if (s->is_multicast && (h->flags & AVIO_FLAG_READ))
-        udp_leave_multicast_group(s->udp_fd, (struct sockaddr *)&s->dest_addr);
+        udp_leave_multicast_group(s->udp_fd, (struct sockaddr *)&s->dest_addr,(struct sockaddr *)&s->local_addr_storage);
     closesocket(s->udp_fd);
-    av_fifo_free(s->fifo);
 #if HAVE_PTHREAD_CANCEL
     if (s->thread_started) {
         pthread_cancel(s->circular_buffer_thread);
         ret = pthread_join(s->circular_buffer_thread, NULL);
         if (ret != 0)
             av_log(h, AV_LOG_ERROR, "pthread_join(): %s\n", strerror(ret));
+        pthread_mutex_destroy(&s->mutex);
+        pthread_cond_destroy(&s->cond);
     }
-
-    pthread_mutex_destroy(&s->mutex);
-    pthread_cond_destroy(&s->cond);
 #endif
+    av_fifo_freep(&s->fifo);
     return 0;
 }
 
@@ -674,5 +890,6 @@ URLProtocol ff_udp_protocol = {
     .url_close           = udp_close,
     .url_get_file_handle = udp_get_file_handle,
     .priv_data_size      = sizeof(UDPContext),
+    .priv_data_class     = &udp_context_class,
     .flags               = URL_PROTOCOL_FLAG_NETWORK,
 };

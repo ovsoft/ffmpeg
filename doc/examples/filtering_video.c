@@ -24,6 +24,7 @@
 /**
  * @file
  * API example for decoding and filtering
+ * @example filtering_video.c
  */
 
 #define _XOPEN_SOURCE 600 /* for usleep */
@@ -34,6 +35,8 @@
 #include <libavfilter/avfiltergraph.h>
 #include <libavfilter/avcodec.h>
 #include <libavfilter/buffersink.h>
+#include <libavfilter/buffersrc.h>
+#include <libavutil/opt.h>
 
 const char *filter_descr = "scale=78:24";
 
@@ -68,6 +71,7 @@ static int open_input_file(const char *filename)
     }
     video_stream_index = ret;
     dec_ctx = fmt_ctx->streams[video_stream_index]->codec;
+    av_opt_set_int(dec_ctx, "refcounted_frames", 1, 0);
 
     /* init the video decoder */
     if ((ret = avcodec_open2(dec_ctx, dec, NULL)) < 0) {
@@ -81,32 +85,46 @@ static int open_input_file(const char *filename)
 static int init_filters(const char *filters_descr)
 {
     char args[512];
-    int ret;
+    int ret = 0;
     AVFilter *buffersrc  = avfilter_get_by_name("buffer");
     AVFilter *buffersink = avfilter_get_by_name("buffersink");
     AVFilterInOut *outputs = avfilter_inout_alloc();
     AVFilterInOut *inputs  = avfilter_inout_alloc();
-    enum PixelFormat pix_fmts[] = { PIX_FMT_GRAY8, PIX_FMT_NONE };
+    enum AVPixelFormat pix_fmts[] = { AV_PIX_FMT_GRAY8, AV_PIX_FMT_NONE };
+
     filter_graph = avfilter_graph_alloc();
+    if (!outputs || !inputs || !filter_graph) {
+        ret = AVERROR(ENOMEM);
+        goto end;
+    }
 
     /* buffer video source: the decoded frames from the decoder will be inserted here. */
-    snprintf(args, sizeof(args), "%d:%d:%d:%d:%d:%d:%d",
-             dec_ctx->width, dec_ctx->height, dec_ctx->pix_fmt,
-             dec_ctx->time_base.num, dec_ctx->time_base.den,
-             dec_ctx->sample_aspect_ratio.num, dec_ctx->sample_aspect_ratio.den);
+    snprintf(args, sizeof(args),
+            "video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d",
+            dec_ctx->width, dec_ctx->height, dec_ctx->pix_fmt,
+            dec_ctx->time_base.num, dec_ctx->time_base.den,
+            dec_ctx->sample_aspect_ratio.num, dec_ctx->sample_aspect_ratio.den);
+
     ret = avfilter_graph_create_filter(&buffersrc_ctx, buffersrc, "in",
                                        args, NULL, filter_graph);
     if (ret < 0) {
         av_log(NULL, AV_LOG_ERROR, "Cannot create buffer source\n");
-        return ret;
+        goto end;
     }
 
     /* buffer video sink: to terminate the filter chain. */
     ret = avfilter_graph_create_filter(&buffersink_ctx, buffersink, "out",
-                                       NULL, pix_fmts, filter_graph);
+                                       NULL, NULL, filter_graph);
     if (ret < 0) {
         av_log(NULL, AV_LOG_ERROR, "Cannot create buffer sink\n");
-        return ret;
+        goto end;
+    }
+
+    ret = av_opt_set_int_list(buffersink_ctx, "pix_fmts", pix_fmts,
+                              AV_PIX_FMT_NONE, AV_OPT_SEARCH_CHILDREN);
+    if (ret < 0) {
+        av_log(NULL, AV_LOG_ERROR, "Cannot set output pixel format\n");
+        goto end;
     }
 
     /* Endpoints for the filter graph. */
@@ -120,42 +138,47 @@ static int init_filters(const char *filters_descr)
     inputs->pad_idx    = 0;
     inputs->next       = NULL;
 
-    if ((ret = avfilter_graph_parse(filter_graph, filters_descr,
+    if ((ret = avfilter_graph_parse_ptr(filter_graph, filters_descr,
                                     &inputs, &outputs, NULL)) < 0)
-        return ret;
+        goto end;
 
     if ((ret = avfilter_graph_config(filter_graph, NULL)) < 0)
-        return ret;
-    return 0;
+        goto end;
+
+end:
+    avfilter_inout_free(&inputs);
+    avfilter_inout_free(&outputs);
+
+    return ret;
 }
 
-static void display_picref(AVFilterBufferRef *picref, AVRational time_base)
+static void display_frame(const AVFrame *frame, AVRational time_base)
 {
     int x, y;
     uint8_t *p0, *p;
     int64_t delay;
 
-    if (picref->pts != AV_NOPTS_VALUE) {
+    if (frame->pts != AV_NOPTS_VALUE) {
         if (last_pts != AV_NOPTS_VALUE) {
             /* sleep roughly the right amount of time;
              * usleep is in microseconds, just like AV_TIME_BASE. */
-            delay = av_rescale_q(picref->pts - last_pts,
+            delay = av_rescale_q(frame->pts - last_pts,
                                  time_base, AV_TIME_BASE_Q);
             if (delay > 0 && delay < 1000000)
                 usleep(delay);
         }
-        last_pts = picref->pts;
+        last_pts = frame->pts;
     }
 
     /* Trivial ASCII grayscale display. */
-    p0 = picref->data[0];
+    p0 = frame->data[0];
     puts("\033c");
-    for (y = 0; y < picref->video->h; y++) {
+    for (y = 0; y < frame->height; y++) {
         p = p0;
-        for (x = 0; x < picref->video->w; x++)
+        for (x = 0; x < frame->width; x++)
             putchar(" .-+#"[*(p++) / 52]);
         putchar('\n');
-        p0 += picref->linesize[0];
+        p0 += frame->linesize[0];
     }
     fflush(stdout);
 }
@@ -164,15 +187,19 @@ int main(int argc, char **argv)
 {
     int ret;
     AVPacket packet;
-    AVFrame frame;
+    AVFrame *frame = av_frame_alloc();
+    AVFrame *filt_frame = av_frame_alloc();
     int got_frame;
 
+    if (!frame || !filt_frame) {
+        perror("Could not allocate frame");
+        exit(1);
+    }
     if (argc != 2) {
         fprintf(stderr, "Usage: %s file\n", argv[0]);
         exit(1);
     }
 
-    avcodec_register_all();
     av_register_all();
     avfilter_register_all();
 
@@ -183,47 +210,50 @@ int main(int argc, char **argv)
 
     /* read all packets */
     while (1) {
-        AVFilterBufferRef *picref;
         if ((ret = av_read_frame(fmt_ctx, &packet)) < 0)
             break;
 
         if (packet.stream_index == video_stream_index) {
-            avcodec_get_frame_defaults(&frame);
             got_frame = 0;
-            ret = avcodec_decode_video2(dec_ctx, &frame, &got_frame, &packet);
-            av_free_packet(&packet);
+            ret = avcodec_decode_video2(dec_ctx, frame, &got_frame, &packet);
             if (ret < 0) {
                 av_log(NULL, AV_LOG_ERROR, "Error decoding video\n");
                 break;
             }
 
             if (got_frame) {
-                frame.pts = av_frame_get_best_effort_timestamp(&frame);
+                frame->pts = av_frame_get_best_effort_timestamp(frame);
 
                 /* push the decoded frame into the filtergraph */
-                av_vsrc_buffer_add_frame(buffersrc_ctx, &frame, 0);
-
-                /* pull filtered pictures from the filtergraph */
-                while (avfilter_poll_frame(buffersink_ctx->inputs[0])) {
-                    av_buffersink_get_buffer_ref(buffersink_ctx, &picref, 0);
-                    if (picref) {
-                        display_picref(picref, buffersink_ctx->inputs[0]->time_base);
-                        avfilter_unref_buffer(picref);
-                    }
+                if (av_buffersrc_add_frame_flags(buffersrc_ctx, frame, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
+                    av_log(NULL, AV_LOG_ERROR, "Error while feeding the filtergraph\n");
+                    break;
                 }
+
+                /* pull filtered frames from the filtergraph */
+                while (1) {
+                    ret = av_buffersink_get_frame(buffersink_ctx, filt_frame);
+                    if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+                        break;
+                    if (ret < 0)
+                        goto end;
+                    display_frame(filt_frame, buffersink_ctx->inputs[0]->time_base);
+                    av_frame_unref(filt_frame);
+                }
+                av_frame_unref(frame);
             }
         }
+        av_free_packet(&packet);
     }
 end:
     avfilter_graph_free(&filter_graph);
-    if (dec_ctx)
-        avcodec_close(dec_ctx);
+    avcodec_close(dec_ctx);
     avformat_close_input(&fmt_ctx);
+    av_frame_free(&frame);
+    av_frame_free(&filt_frame);
 
     if (ret < 0 && ret != AVERROR_EOF) {
-        char buf[1024];
-        av_strerror(ret, buf, sizeof(buf));
-        fprintf(stderr, "Error occurred: %s\n", buf);
+        fprintf(stderr, "Error occurred: %s\n", av_err2str(ret));
         exit(1);
     }
 

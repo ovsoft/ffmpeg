@@ -1,9 +1,9 @@
 include $(SUBDIR)../config.mak
 
 NAME = swscale
-FFLIBS = avutil
 
-HEADERS = swscale.h
+HEADERS = swscale.h                                                     \
+          version.h                                                     \
 
 OBJS = input.o                                          \
        options.o                                        \
@@ -13,6 +13,9 @@ OBJS = input.o                                          \
        swscale_unscaled.o                               \
        utils.o                                          \
        yuv2rgb.o                                        \
+
+# Windows resource file
+SLIBOBJS-$(HAVE_GNU_WINDRES) += swscaleres.o
 
 TESTPROGS = colorspace                                                  \
             swscale                                                     \

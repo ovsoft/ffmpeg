@@ -27,10 +27,12 @@
  */
 
 #include "avcodec.h"
+#include "dct.h"
 #include "internal.h"
 #include "put_bits.h"
 #include "bytestream.h"
 #include "dsputil.h"
+#include "fdctdsp.h"
 
 #define DEFAULT_SLICE_MB_WIDTH 8
 
@@ -144,6 +146,7 @@ static const uint8_t QMAT_CHROMA[4][64] = {
 
 
 typedef struct {
+    FDCTDSPContext fdsp;
     uint8_t* fill_y;
     uint8_t* fill_u;
     uint8_t* fill_v;
@@ -182,11 +185,11 @@ static void encode_codeword(PutBitContext *pb, int val, int codebook)
     }
 }
 
-#define QSCALE(qmat,ind,val) ((val) / (qmat[ind]))
-#define TO_GOLOMB(val) ((val << 1) ^ (val >> 31))
-#define DIFF_SIGN(val, sign) ((val >> 31) ^ sign)
-#define IS_NEGATIVE(val) (((val >> 31) ^ -1) + 1)
-#define TO_GOLOMB2(val,sign) (val==0 ? 0 : (val << 1) + sign)
+#define QSCALE(qmat,ind,val) ((val) / ((qmat)[ind]))
+#define TO_GOLOMB(val) (((val) << 1) ^ ((val) >> 31))
+#define DIFF_SIGN(val, sign) (((val) >> 31) ^ (sign))
+#define IS_NEGATIVE(val) ((((val) >> 31) ^ -1) + 1)
+#define TO_GOLOMB2(val,sign) ((val)==0 ? 0 : ((val) << 1) + (sign))
 
 static av_always_inline int get_level(int val)
 {
@@ -198,7 +201,7 @@ static av_always_inline int get_level(int val)
 
 static const uint8_t dc_codebook[7] = { 0x04, 0x28, 0x28, 0x4D, 0x4D, 0x70, 0x70};
 
-static void encode_dc_coeffs(PutBitContext *pb, DCTELEM *in,
+static void encode_dc_coeffs(PutBitContext *pb, int16_t *in,
         int blocks_per_slice, int *qmat)
 {
     int prev_dc, code;
@@ -230,7 +233,7 @@ static const uint8_t lev_to_cb[10] = { 0x04, 0x0A, 0x05, 0x06, 0x04, 0x28,
         0x28, 0x28, 0x28, 0x4C };
 
 static void encode_ac_coeffs(AVCodecContext *avctx, PutBitContext *pb,
-        DCTELEM *in, int blocks_per_slice, int *qmat)
+        int16_t *in, int blocks_per_slice, int *qmat)
 {
     int prev_run = 4;
     int prev_level = 2;
@@ -260,42 +263,41 @@ static void encode_ac_coeffs(AVCodecContext *avctx, PutBitContext *pb,
     }
 }
 
-static void get(uint8_t *pixels, int stride, DCTELEM* block)
+static void get(uint8_t *pixels, int stride, int16_t* block)
 {
-    int16_t *p = (int16_t*)pixels;
-    int i, j;
+    int i;
 
-    stride >>= 1;
     for (i = 0; i < 8; i++) {
-        for (j = 0; j < 8; j++) {
-            block[j] = p[j];
-        }
-        p += stride;
+        AV_WN64(block, AV_RN64(pixels));
+        AV_WN64(block+4, AV_RN64(pixels+8));
+        pixels += stride;
         block += 8;
     }
 }
 
-static void fdct_get(uint8_t *pixels, int stride, DCTELEM* block)
+static void fdct_get(FDCTDSPContext *fdsp, uint8_t *pixels, int stride, int16_t* block)
 {
     get(pixels, stride, block);
-    ff_jpeg_fdct_islow_10(block);
+    fdsp->fdct(block);
 }
 
 static int encode_slice_plane(AVCodecContext *avctx, int mb_count,
         uint8_t *src, int src_stride, uint8_t *buf, unsigned buf_size,
         int *qmat, int chroma)
 {
-    DECLARE_ALIGNED(16, DCTELEM, blocks)[DEFAULT_SLICE_MB_WIDTH << 8], *block;
+    ProresContext* ctx = avctx->priv_data;
+    FDCTDSPContext *fdsp = &ctx->fdsp;
+    DECLARE_ALIGNED(16, int16_t, blocks)[DEFAULT_SLICE_MB_WIDTH << 8], *block;
     int i, blocks_per_slice;
     PutBitContext pb;
 
     block = blocks;
     for (i = 0; i < mb_count; i++) {
-        fdct_get(src,                  src_stride, block + (0 << 6));
-        fdct_get(src + 8 * src_stride, src_stride, block + ((2 - chroma) << 6));
+        fdct_get(fdsp, src,                  src_stride, block + (0 << 6));
+        fdct_get(fdsp, src + 8 * src_stride, src_stride, block + ((2 - chroma) << 6));
         if (!chroma) {
-            fdct_get(src + 16,                  src_stride, block + (1 << 6));
-            fdct_get(src + 16 + 8 * src_stride, src_stride, block + (3 << 6));
+            fdct_get(fdsp, src + 16,                  src_stride, block + (1 << 6));
+            fdct_get(fdsp, src + 16 + 8 * src_stride, src_stride, block + (3 << 6));
         }
 
         block += (256 >> chroma);
@@ -367,7 +369,7 @@ static void subimage_with_fill(uint16_t *src, unsigned x, unsigned y,
     }
 }
 
-static int encode_slice(AVCodecContext *avctx, AVFrame *pic, int mb_x,
+static int encode_slice(AVCodecContext *avctx, const AVFrame *pic, int mb_x,
         int mb_y, unsigned mb_count, uint8_t *buf, unsigned data_size,
         int unsafe, int *qp)
 {
@@ -437,7 +439,7 @@ static int encode_slice(AVCodecContext *avctx, AVFrame *pic, int mb_x,
     return hdr_size + y_data_size + u_data_size + v_data_size;
 }
 
-static int prores_encode_picture(AVCodecContext *avctx, AVFrame *pic,
+static int prores_encode_picture(AVCodecContext *avctx, const AVFrame *pic,
         uint8_t *buf, const int buf_size)
 {
     int mb_width = (avctx->width + 15) >> 4;
@@ -540,14 +542,22 @@ static av_cold int prores_encode_init(AVCodecContext *avctx)
     int i;
     ProresContext* ctx = avctx->priv_data;
 
-    if (avctx->pix_fmt != PIX_FMT_YUV422P10) {
+    if (avctx->pix_fmt != AV_PIX_FMT_YUV422P10) {
         av_log(avctx, AV_LOG_ERROR, "need YUV422P10\n");
         return -1;
     }
+    avctx->bits_per_raw_sample = 10;
+
     if (avctx->width & 0x1) {
         av_log(avctx, AV_LOG_ERROR,
                 "frame width needs to be multiple of 2\n");
         return -1;
+    }
+
+    if (avctx->width > 65534 || avctx->height > 65535) {
+        av_log(avctx, AV_LOG_ERROR,
+                "The maximum dimensions are 65534x65535\n");
+        return AVERROR(EINVAL);
     }
 
     if ((avctx->height & 0xf) || (avctx->width & 0xf)) {
@@ -573,6 +583,8 @@ static av_cold int prores_encode_init(AVCodecContext *avctx)
         return -1;
     }
 
+    ff_fdctdsp_init(&ctx->fdsp, avctx);
+
     avctx->codec_tag = AV_RL32((const uint8_t*)profiles[avctx->profile].name);
 
     for (i = 1; i <= 16; i++) {
@@ -580,7 +592,7 @@ static av_cold int prores_encode_init(AVCodecContext *avctx)
         scale_mat(QMAT_CHROMA[avctx->profile], ctx->qmat_chroma[i - 1], i);
     }
 
-    avctx->coded_frame = avcodec_alloc_frame();
+    avctx->coded_frame = av_frame_alloc();
     avctx->coded_frame->key_frame = 1;
     avctx->coded_frame->pict_type = AV_PICTURE_TYPE_I;
 
@@ -596,28 +608,30 @@ static av_cold int prores_encode_close(AVCodecContext *avctx)
     return 0;
 }
 
-AVCodec ff_prores_anatoliy_encoder = {
-    .name           = "prores_anatoliy",
+AVCodec ff_prores_aw_encoder = {
+    .name           = "prores_aw",
+    .long_name      = NULL_IF_CONFIG_SMALL("Apple ProRes"),
     .type           = AVMEDIA_TYPE_VIDEO,
-    .id             = CODEC_ID_PRORES,
+    .id             = AV_CODEC_ID_PRORES,
     .priv_data_size = sizeof(ProresContext),
     .init           = prores_encode_init,
     .close          = prores_encode_close,
     .encode2        = prores_encode_frame,
-    .pix_fmts       = (const enum PixelFormat[]){PIX_FMT_YUV422P10, PIX_FMT_NONE},
-    .long_name      = NULL_IF_CONFIG_SMALL("Apple ProRes"),
+    .pix_fmts       = (const enum AVPixelFormat[]){AV_PIX_FMT_YUV422P10, AV_PIX_FMT_NONE},
+    .capabilities   = CODEC_CAP_FRAME_THREADS | CODEC_CAP_INTRA_ONLY,
     .profiles       = profiles
 };
 
 AVCodec ff_prores_encoder = {
     .name           = "prores",
+    .long_name      = NULL_IF_CONFIG_SMALL("Apple ProRes"),
     .type           = AVMEDIA_TYPE_VIDEO,
-    .id             = CODEC_ID_PRORES,
+    .id             = AV_CODEC_ID_PRORES,
     .priv_data_size = sizeof(ProresContext),
     .init           = prores_encode_init,
     .close          = prores_encode_close,
     .encode2        = prores_encode_frame,
-    .pix_fmts       = (const enum PixelFormat[]){PIX_FMT_YUV422P10, PIX_FMT_NONE},
-    .long_name      = NULL_IF_CONFIG_SMALL("Apple ProRes"),
+    .pix_fmts       = (const enum AVPixelFormat[]){AV_PIX_FMT_YUV422P10, AV_PIX_FMT_NONE},
+    .capabilities   = CODEC_CAP_FRAME_THREADS | CODEC_CAP_INTRA_ONLY,
     .profiles       = profiles
 };

@@ -28,7 +28,6 @@
 #define AVCODEC_RV34_H
 
 #include "avcodec.h"
-#include "dsputil.h"
 #include "mpegvideo.h"
 
 #include "h264pred.h"
@@ -103,7 +102,7 @@ typedef struct RV34DecContext{
     int dmv[4][2];           ///< differential motion vectors for the current macroblock
 
     int rv30;                ///< indicates which RV variasnt is currently decoded
-    int rpr;                 ///< one field size in RV30 slice header
+    int max_rpr;
 
     int cur_pts, last_pts, next_pts;
     int scaled_weight;
@@ -133,7 +132,7 @@ typedef struct RV34DecContext{
  */
 int ff_rv34_get_start_offset(GetBitContext *gb, int blocks);
 int ff_rv34_decode_init(AVCodecContext *avctx);
-int ff_rv34_decode_frame(AVCodecContext *avctx, void *data, int *data_size, AVPacket *avpkt);
+int ff_rv34_decode_frame(AVCodecContext *avctx, void *data, int *got_frame, AVPacket *avpkt);
 int ff_rv34_decode_end(AVCodecContext *avctx);
 int ff_rv34_decode_init_thread_copy(AVCodecContext *avctx);
 int ff_rv34_decode_update_thread_context(AVCodecContext *dst, const AVCodecContext *src);

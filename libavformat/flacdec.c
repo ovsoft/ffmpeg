@@ -21,10 +21,12 @@
 
 #include "libavcodec/flac.h"
 #include "avformat.h"
+#include "flac_picture.h"
 #include "internal.h"
 #include "rawdec.h"
 #include "oggdec.h"
 #include "vorbiscomment.h"
+#include "replaygain.h"
 #include "libavcodec/bytestream.h"
 
 static int flac_read_header(AVFormatContext *s)
@@ -36,8 +38,8 @@ static int flac_read_header(AVFormatContext *s)
     if (!st)
         return AVERROR(ENOMEM);
     st->codec->codec_type = AVMEDIA_TYPE_AUDIO;
-    st->codec->codec_id = CODEC_ID_FLAC;
-    st->need_parsing = AVSTREAM_PARSE_FULL;
+    st->codec->codec_id = AV_CODEC_ID_FLAC;
+    st->need_parsing = AVSTREAM_PARSE_FULL_RAW;
     /* the parameters will be extracted from the compressed bitstream */
 
     /* if fLaC marker is not found, assume there is no header */
@@ -49,20 +51,20 @@ static int flac_read_header(AVFormatContext *s)
     /* process metadata blocks */
     while (!url_feof(s->pb) && !metadata_last) {
         avio_read(s->pb, header, 4);
-        avpriv_flac_parse_block_header(header, &metadata_last, &metadata_type,
+        flac_parse_block_header(header, &metadata_last, &metadata_type,
                                    &metadata_size);
         switch (metadata_type) {
         /* allocate and read metadata block for supported types */
         case FLAC_METADATA_TYPE_STREAMINFO:
         case FLAC_METADATA_TYPE_CUESHEET:
+        case FLAC_METADATA_TYPE_PICTURE:
         case FLAC_METADATA_TYPE_VORBIS_COMMENT:
             buffer = av_mallocz(metadata_size + FF_INPUT_BUFFER_PADDING_SIZE);
             if (!buffer) {
                 return AVERROR(ENOMEM);
             }
             if (avio_read(s->pb, buffer, metadata_size) != metadata_size) {
-                av_freep(&buffer);
-                return AVERROR(EIO);
+                RETURN_ERROR(AVERROR(EIO));
             }
             break;
         /* skip metadata block for unsupported types */
@@ -76,12 +78,10 @@ static int flac_read_header(AVFormatContext *s)
             FLACStreaminfo si;
             /* STREAMINFO can only occur once */
             if (found_streaminfo) {
-                av_freep(&buffer);
-                return AVERROR_INVALIDDATA;
+                RETURN_ERROR(AVERROR_INVALIDDATA);
             }
             if (metadata_size != FLAC_STREAMINFO_SIZE) {
-                av_freep(&buffer);
-                return AVERROR_INVALIDDATA;
+                RETURN_ERROR(AVERROR_INVALIDDATA);
             }
             found_streaminfo = 1;
             st->codec->extradata      = buffer;
@@ -103,50 +103,126 @@ static int flac_read_header(AVFormatContext *s)
             const uint8_t *offset;
             int i, chapters, track, ti;
             if (metadata_size < 431)
-                return AVERROR_INVALIDDATA;
+                RETURN_ERROR(AVERROR_INVALIDDATA);
             offset = buffer + 395;
             chapters = bytestream_get_byte(&offset) - 1;
             if (chapters <= 0)
-                return AVERROR_INVALIDDATA;
+                RETURN_ERROR(AVERROR_INVALIDDATA);
             for (i = 0; i < chapters; i++) {
                 if (offset + 36 - buffer > metadata_size)
-                    return AVERROR_INVALIDDATA;
+                    RETURN_ERROR(AVERROR_INVALIDDATA);
                 start = bytestream_get_be64(&offset);
                 track = bytestream_get_byte(&offset);
                 bytestream_get_buffer(&offset, isrc, 12);
                 isrc[12] = 0;
                 offset += 14;
                 ti = bytestream_get_byte(&offset);
-                if (ti <= 0) return AVERROR_INVALIDDATA;
+                if (ti <= 0) RETURN_ERROR(AVERROR_INVALIDDATA);
                 offset += ti * 12;
                 avpriv_new_chapter(s, track, st->time_base, start, AV_NOPTS_VALUE, isrc);
+            }
+            av_freep(&buffer);
+        } else if (metadata_type == FLAC_METADATA_TYPE_PICTURE) {
+            ret = ff_flac_parse_picture(s, buffer, metadata_size);
+            av_freep(&buffer);
+            if (ret < 0) {
+                av_log(s, AV_LOG_ERROR, "Error parsing attached picture.\n");
+                return ret;
             }
         } else {
             /* STREAMINFO must be the first block */
             if (!found_streaminfo) {
-                av_freep(&buffer);
-                return AVERROR_INVALIDDATA;
+                RETURN_ERROR(AVERROR_INVALIDDATA);
             }
             /* process supported blocks other than STREAMINFO */
             if (metadata_type == FLAC_METADATA_TYPE_VORBIS_COMMENT) {
-                if (ff_vorbis_comment(s, &s->metadata, buffer, metadata_size)) {
+                AVDictionaryEntry *chmask;
+
+                if (ff_vorbis_comment(s, &s->metadata, buffer, metadata_size, 1)) {
                     av_log(s, AV_LOG_WARNING, "error parsing VorbisComment metadata\n");
+                }
+
+                /* parse the channels mask if present */
+                chmask = av_dict_get(s->metadata, "WAVEFORMATEXTENSIBLE_CHANNEL_MASK", NULL, 0);
+                if (chmask) {
+                    uint64_t mask = strtol(chmask->value, NULL, 0);
+                    if (!mask || mask & ~0x3ffffULL) {
+                        av_log(s, AV_LOG_WARNING,
+                               "Invalid value of WAVEFORMATEXTENSIBLE_CHANNEL_MASK\n");
+                    } else {
+                        st->codec->channel_layout = mask;
+                        av_dict_set(&s->metadata, "WAVEFORMATEXTENSIBLE_CHANNEL_MASK", NULL, 0);
+                    }
                 }
             }
             av_freep(&buffer);
         }
     }
 
+    ret = ff_replaygain_export(st, s->metadata);
+    if (ret < 0)
+        return ret;
+
     return 0;
+
+fail:
+    av_free(buffer);
+    return ret;
 }
 
 static int flac_probe(AVProbeData *p)
 {
-    uint8_t *bufptr = p->buf;
-    uint8_t *end    = p->buf + p->buf_size;
+    if (p->buf_size < 4 || memcmp(p->buf, "fLaC", 4))
+        return 0;
+    return AVPROBE_SCORE_EXTENSION;
+}
 
-    if(bufptr > end-4 || memcmp(bufptr, "fLaC", 4)) return 0;
-    else                                            return AVPROBE_SCORE_MAX/2;
+static av_unused int64_t flac_read_timestamp(AVFormatContext *s, int stream_index,
+                                             int64_t *ppos, int64_t pos_limit)
+{
+    AVPacket pkt, out_pkt;
+    AVStream *st = s->streams[stream_index];
+    AVCodecParserContext *parser;
+    int ret;
+    int64_t pts = AV_NOPTS_VALUE;
+
+    if (avio_seek(s->pb, *ppos, SEEK_SET) < 0)
+        return AV_NOPTS_VALUE;
+
+    av_init_packet(&pkt);
+    parser = av_parser_init(st->codec->codec_id);
+    if (!parser){
+        return AV_NOPTS_VALUE;
+    }
+    parser->flags |= PARSER_FLAG_USE_CODEC_TS;
+
+    for (;;){
+        ret = ff_raw_read_partial_packet(s, &pkt);
+        if (ret < 0){
+            if (ret == AVERROR(EAGAIN))
+                continue;
+            else
+                break;
+        }
+        av_init_packet(&out_pkt);
+        ret = av_parser_parse2(parser, st->codec,
+                               &out_pkt.data, &out_pkt.size, pkt.data, pkt.size,
+                               pkt.pts, pkt.dts, *ppos);
+
+        av_free_packet(&pkt);
+        if (out_pkt.size){
+            int size = out_pkt.size;
+            if (parser->pts != AV_NOPTS_VALUE){
+                // seeking may not have started from beginning of a frame
+                // calculate frame start position from next frame backwards
+                *ppos = parser->next_frame_offset - size;
+                pts = parser->pts;
+                break;
+            }
+        }
+    }
+    av_parser_close(parser);
+    return pts;
 }
 
 AVInputFormat ff_flac_demuxer = {
@@ -155,7 +231,8 @@ AVInputFormat ff_flac_demuxer = {
     .read_probe     = flac_probe,
     .read_header    = flac_read_header,
     .read_packet    = ff_raw_read_partial_packet,
+    .read_timestamp = flac_read_timestamp,
     .flags          = AVFMT_GENERIC_INDEX,
     .extensions     = "flac",
-    .raw_codec_id   = CODEC_ID_FLAC,
+    .raw_codec_id   = AV_CODEC_ID_FLAC,
 };

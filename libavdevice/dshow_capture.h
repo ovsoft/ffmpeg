@@ -28,8 +28,14 @@
 
 #define COBJMACROS
 #include <windows.h>
+#define NO_DSHOW_STRSAFE
 #include <dshow.h>
 #include <dvdmedia.h>
+
+/* EC_DEVICE_LOST is not defined in MinGW dshow headers. */
+#ifndef EC_DEVICE_LOST
+#define EC_DEVICE_LOST 0x1f
+#endif
 
 long ff_copy_dshow_media_type(AM_MEDIA_TYPE *dst, const AM_MEDIA_TYPE *src);
 void ff_print_VIDEO_STREAM_CONFIG_CAPS(const VIDEO_STREAM_CONFIG_CAPS *caps);
@@ -179,7 +185,7 @@ long          WINAPI libAVMemInputPin_QueryInterface          (libAVMemInputPin 
 unsigned long WINAPI libAVMemInputPin_AddRef                  (libAVMemInputPin *);
 unsigned long WINAPI libAVMemInputPin_Release                 (libAVMemInputPin *);
 long          WINAPI libAVMemInputPin_GetAllocator            (libAVMemInputPin *, IMemAllocator **);
-long          WINAPI libAVMemInputPin_NotifyAllocator         (libAVMemInputPin *, IMemAllocator *, WINBOOL);
+long          WINAPI libAVMemInputPin_NotifyAllocator         (libAVMemInputPin *, IMemAllocator *, BOOL);
 long          WINAPI libAVMemInputPin_GetAllocatorRequirements(libAVMemInputPin *, ALLOCATOR_PROPERTIES *);
 long          WINAPI libAVMemInputPin_Receive                 (libAVMemInputPin *, IMediaSample *);
 long          WINAPI libAVMemInputPin_ReceiveMultiple         (libAVMemInputPin *, IMediaSample **, long, long *);
@@ -248,7 +254,7 @@ struct libAVFilter {
     void *priv_data;
     int stream_index;
     int64_t start_time;
-    void (*callback)(void *priv_data, int index, uint8_t *buf, int buf_size, int64_t time);
+    void (*callback)(void *priv_data, int index, uint8_t *buf, int buf_size, int64_t time, enum dshowDeviceType type);
 };
 
 long          WINAPI libAVFilter_QueryInterface (libAVFilter *, const GUID *, void **);

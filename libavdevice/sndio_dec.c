@@ -25,6 +25,7 @@
 #include "libavformat/avformat.h"
 #include "libavformat/internal.h"
 #include "libavutil/opt.h"
+#include "libavutil/time.h"
 
 #include "sndio_common.h"
 
@@ -93,8 +94,8 @@ static av_cold int audio_read_close(AVFormatContext *s1)
 }
 
 static const AVOption options[] = {
-    { "sample_rate", "", offsetof(SndioData, sample_rate), AV_OPT_TYPE_INT, {.dbl = 48000}, 1, INT_MAX, AV_OPT_FLAG_DECODING_PARAM },
-    { "channels",    "", offsetof(SndioData, channels),    AV_OPT_TYPE_INT, {.dbl = 2},     1, INT_MAX, AV_OPT_FLAG_DECODING_PARAM },
+    { "sample_rate", "", offsetof(SndioData, sample_rate), AV_OPT_TYPE_INT, {.i64 = 48000}, 1, INT_MAX, AV_OPT_FLAG_DECODING_PARAM },
+    { "channels",    "", offsetof(SndioData, channels),    AV_OPT_TYPE_INT, {.i64 = 2},     1, INT_MAX, AV_OPT_FLAG_DECODING_PARAM },
     { NULL },
 };
 
@@ -103,6 +104,7 @@ static const AVClass sndio_demuxer_class = {
     .item_name      = av_default_item_name,
     .option         = options,
     .version        = LIBAVUTIL_VERSION_INT,
+    .category       = AV_CLASS_CATEGORY_DEVICE_AUDIO_INPUT,
 };
 
 AVInputFormat ff_sndio_demuxer = {

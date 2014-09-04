@@ -27,7 +27,7 @@
 #include "libavutil/imgutils.h"
 
 #include "avcodec.h"
-#include "dsputil.h"
+#include "mpegutils.h"
 #include "mpegvideo.h"
 #include "golomb.h"
 
@@ -360,14 +360,14 @@ static void rv40_loop_filter(RV34DecContext *r, int row)
     int uvcbp[4][2];
     /**
      * This mask represents the pattern of luma subblocks that should be filtered
-     * in addition to the coded ones because because they lie at the edge of
+     * in addition to the coded ones because they lie at the edge of
      * 8x8 block with different enough motion vectors
      */
     unsigned mvmasks[4];
 
     mb_pos = row * s->mb_stride;
     for(mb_x = 0; mb_x < s->mb_width; mb_x++, mb_pos++){
-        int mbtype = s->current_picture_ptr->f.mb_type[mb_pos];
+        int mbtype = s->current_picture_ptr->mb_type[mb_pos];
         if(IS_INTRA(mbtype) || IS_SEPARATE_DC(mbtype))
             r->cbp_luma  [mb_pos] = r->deblock_coefs[mb_pos] = 0xFFFF;
         if(IS_INTRA(mbtype))
@@ -382,7 +382,7 @@ static void rv40_loop_filter(RV34DecContext *r, int row)
         unsigned y_to_deblock;
         int c_to_deblock[2];
 
-        q = s->current_picture_ptr->f.qscale_table[mb_pos];
+        q = s->current_picture_ptr->qscale_table[mb_pos];
         alpha = rv40_alpha_tab[q];
         beta  = rv40_beta_tab [q];
         betaY = betaC = beta * 3;
@@ -397,7 +397,7 @@ static void rv40_loop_filter(RV34DecContext *r, int row)
             if(avail[i]){
                 int pos = mb_pos + neighbour_offs_x[i] + neighbour_offs_y[i]*s->mb_stride;
                 mvmasks[i] = r->deblock_coefs[pos];
-                mbtype [i] = s->current_picture_ptr->f.mb_type[pos];
+                mbtype [i] = s->current_picture_ptr->mb_type[pos];
                 cbp    [i] = r->cbp_luma[pos];
                 uvcbp[i][0] = r->cbp_chroma[pos] & 0xF;
                 uvcbp[i][1] = r->cbp_chroma[pos] >> 4;
@@ -456,7 +456,7 @@ static void rv40_loop_filter(RV34DecContext *r, int row)
         }
 
         for(j = 0; j < 16; j += 4){
-            Y = s->current_picture_ptr->f.data[0] + mb_x*16 + (row*16 + j) * s->linesize;
+            Y = s->current_picture_ptr->f->data[0] + mb_x*16 + (row*16 + j) * s->linesize;
             for(i = 0; i < 4; i++, Y += 4){
                 int ij = i + j;
                 int clip_cur = y_to_deblock & (MASK_CUR << ij) ? clip[POS_CUR] : 0;
@@ -501,7 +501,7 @@ static void rv40_loop_filter(RV34DecContext *r, int row)
         }
         for(k = 0; k < 2; k++){
             for(j = 0; j < 2; j++){
-                C = s->current_picture_ptr->f.data[k + 1] + mb_x*8 + (row*8 + j*4) * s->uvlinesize;
+                C = s->current_picture_ptr->f->data[k + 1] + mb_x*8 + (row*8 + j*4) * s->uvlinesize;
                 for(i = 0; i < 2; i++, C += 4){
                     int ij = i + j*2;
                     int clip_cur = c_to_deblock[k] & (MASK_CUR << ij) ? clip[POS_CUR] : 0;
@@ -548,9 +548,11 @@ static void rv40_loop_filter(RV34DecContext *r, int row)
 static av_cold int rv40_decode_init(AVCodecContext *avctx)
 {
     RV34DecContext *r = avctx->priv_data;
+    int ret;
 
     r->rv30 = 0;
-    ff_rv34_decode_init(avctx);
+    if ((ret = ff_rv34_decode_init(avctx)) < 0)
+        return ret;
     if(!aic_top_vlc.bits)
         rv40_init_tables();
     r->parse_slice_header = rv40_parse_slice_header;
@@ -564,8 +566,9 @@ static av_cold int rv40_decode_init(AVCodecContext *avctx)
 
 AVCodec ff_rv40_decoder = {
     .name                  = "rv40",
+    .long_name             = NULL_IF_CONFIG_SMALL("RealVideo 4.0"),
     .type                  = AVMEDIA_TYPE_VIDEO,
-    .id                    = CODEC_ID_RV40,
+    .id                    = AV_CODEC_ID_RV40,
     .priv_data_size        = sizeof(RV34DecContext),
     .init                  = rv40_decode_init,
     .close                 = ff_rv34_decode_end,
@@ -573,8 +576,10 @@ AVCodec ff_rv40_decoder = {
     .capabilities          = CODEC_CAP_DR1 | CODEC_CAP_DELAY |
                              CODEC_CAP_FRAME_THREADS,
     .flush                 = ff_mpeg_flush,
-    .long_name             = NULL_IF_CONFIG_SMALL("RealVideo 4.0"),
-    .pix_fmts              = ff_pixfmt_list_420,
+    .pix_fmts              = (const enum AVPixelFormat[]) {
+        AV_PIX_FMT_YUV420P,
+        AV_PIX_FMT_NONE
+    },
     .init_thread_copy      = ONLY_IF_THREADS_ENABLED(ff_rv34_decode_init_thread_copy),
     .update_thread_context = ONLY_IF_THREADS_ENABLED(ff_rv34_decode_update_thread_context),
 };

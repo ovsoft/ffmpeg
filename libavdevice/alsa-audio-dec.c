@@ -49,6 +49,7 @@
 #include "libavformat/internal.h"
 #include "libavutil/opt.h"
 #include "libavutil/mathematics.h"
+#include "libavutil/time.h"
 
 #include "avdevice.h"
 #include "alsa-audio.h"
@@ -58,7 +59,7 @@ static av_cold int audio_read_header(AVFormatContext *s1)
     AlsaData *s = s1->priv_data;
     AVStream *st;
     int ret;
-    enum CodecID codec_id;
+    enum AVCodecID codec_id;
 
     st = avformat_new_stream(s1, NULL);
     if (!st) {
@@ -132,8 +133,8 @@ static int audio_read_packet(AVFormatContext *s1, AVPacket *pkt)
 }
 
 static const AVOption options[] = {
-    { "sample_rate", "", offsetof(AlsaData, sample_rate), AV_OPT_TYPE_INT, {.dbl = 48000}, 1, INT_MAX, AV_OPT_FLAG_DECODING_PARAM },
-    { "channels",    "", offsetof(AlsaData, channels),    AV_OPT_TYPE_INT, {.dbl = 2},     1, INT_MAX, AV_OPT_FLAG_DECODING_PARAM },
+    { "sample_rate", "", offsetof(AlsaData, sample_rate), AV_OPT_TYPE_INT, {.i64 = 48000}, 1, INT_MAX, AV_OPT_FLAG_DECODING_PARAM },
+    { "channels",    "", offsetof(AlsaData, channels),    AV_OPT_TYPE_INT, {.i64 = 2},     1, INT_MAX, AV_OPT_FLAG_DECODING_PARAM },
     { NULL },
 };
 
@@ -142,6 +143,7 @@ static const AVClass alsa_demuxer_class = {
     .item_name      = av_default_item_name,
     .option         = options,
     .version        = LIBAVUTIL_VERSION_INT,
+    .category       = AV_CLASS_CATEGORY_DEVICE_AUDIO_INPUT,
 };
 
 AVInputFormat ff_alsa_demuxer = {

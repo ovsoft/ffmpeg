@@ -1,7 +1,7 @@
 /*
  * MMS protocol over TCP
  * Copyright (c) 2006,2007 Ryan Martell
- * Copyright (c) 2007 Björn Axelsson
+ * Copyright (c) 2007 BjÃ¶rn Axelsson
  * Copyright (c) 2010 Zhentan Feng <spyfeng at gmail dot com>
  *
  * This file is part of FFmpeg.
@@ -144,7 +144,7 @@ static int send_command_packet(MMSTContext *mmst)
         av_log(NULL, AV_LOG_ERROR,
                "Failed to write data of length %d: %d (%s)\n",
                exact_length, write_result,
-               write_result < 0 ? strerror(write_result) :
+               write_result < 0 ? strerror(AVUNERROR(write_result)) :
                    "The server closed the connection");
         return AVERROR(EIO);
     }
@@ -152,7 +152,7 @@ static int send_command_packet(MMSTContext *mmst)
     return 0;
 }
 
-static void mms_put_utf16(MMSContext *mms, const uint8_t *src)
+static int mms_put_utf16(MMSContext *mms, const uint8_t *src)
 {
     AVIOContext bic;
     int size = mms->write_out_ptr - mms->out_buffer;
@@ -161,7 +161,10 @@ static void mms_put_utf16(MMSContext *mms, const uint8_t *src)
             sizeof(mms->out_buffer) - size, 1, NULL, NULL, NULL, NULL);
 
     len = avio_put_str16le(&bic, src);
+    if (len < 0)
+        return len;
     mms->write_out_ptr += len;
+    return 0;
 }
 
 static int send_time_test_data(MMSTContext *mmst)
@@ -173,6 +176,7 @@ static int send_time_test_data(MMSTContext *mmst)
 
 static int send_protocol_select(MMSTContext *mmst)
 {
+    int ret;
     char data_string[256];
     MMSContext *mms = &mmst->mms;
 
@@ -189,18 +193,21 @@ static int send_protocol_select(MMSTContext *mmst)
             "TCP",                                        // or UDP
             LOCAL_PORT);
 
-    mms_put_utf16(mms, data_string);
+    if ((ret = mms_put_utf16(mms, data_string)) < 0)
+        return ret;
     return send_command_packet(mmst);
 }
 
 static int send_media_file_request(MMSTContext *mmst)
 {
+    int ret;
     MMSContext *mms = &mmst->mms;
     start_command_packet(mmst, CS_PKT_MEDIA_FILE_REQUEST);
     insert_command_prefixes(mms, 1, 0xffffffff);
     bytestream_put_le32(&mms->write_out_ptr, 0);
     bytestream_put_le32(&mms->write_out_ptr, 0);
-    mms_put_utf16(mms, mmst->path + 1); // +1 for skip "/"
+    if ((ret = mms_put_utf16(mms, mmst->path + 1)) < 0) // +1 for skip "/"
+        return ret;
 
     return send_command_packet(mmst);
 }
@@ -246,7 +253,7 @@ static MMSSCPacketType get_tcp_server_response(MMSTContext *mmst)
             if(read_result < 0) {
                 av_log(NULL, AV_LOG_ERROR,
                        "Error reading packet header: %d (%s)\n",
-                       read_result, strerror(read_result));
+                       read_result, strerror(AVUNERROR(read_result)));
                 packet_type = SC_PKT_CANCEL;
             } else {
                 av_log(NULL, AV_LOG_ERROR,
@@ -266,7 +273,7 @@ static MMSSCPacketType get_tcp_server_response(MMSTContext *mmst)
                 av_log(NULL, AV_LOG_ERROR,
                        "Reading command packet length failed: %d (%s)\n",
                        read_result,
-                       read_result < 0 ? strerror(read_result) :
+                       read_result < 0 ? strerror(AVUNERROR(read_result)) :
                            "The server closed the connection");
                 return read_result < 0 ? read_result : AVERROR(EIO);
             }
@@ -277,7 +284,7 @@ static MMSSCPacketType get_tcp_server_response(MMSTContext *mmst)
             if (length_remaining < 0
                 || length_remaining > sizeof(mms->in_buffer) - 12) {
                 av_log(NULL, AV_LOG_ERROR,
-                       "Incoming packet length %d exceeds bufsize %zu\n",
+                       "Incoming packet length %d exceeds bufsize %"SIZE_SPECIFIER"\n",
                        length_remaining, sizeof(mms->in_buffer) - 12);
                 return AVERROR_INVALIDDATA;
             }
@@ -287,7 +294,7 @@ static MMSSCPacketType get_tcp_server_response(MMSTContext *mmst)
                 av_log(NULL, AV_LOG_ERROR,
                        "Reading pkt data (length=%d) failed: %d (%s)\n",
                        length_remaining, read_result,
-                       read_result < 0 ? strerror(read_result) :
+                       read_result < 0 ? strerror(AVUNERROR(read_result)) :
                            "The server closed the connection");
                 return read_result < 0 ? read_result : AVERROR(EIO);
             }
@@ -313,7 +320,7 @@ static MMSSCPacketType get_tcp_server_response(MMSTContext *mmst)
             if (length_remaining < 0
                 || length_remaining > sizeof(mms->in_buffer) - 8) {
                 av_log(NULL, AV_LOG_ERROR,
-                       "Data length %d is invalid or too large (max=%zu)\n",
+                       "Data length %d is invalid or too large (max=%"SIZE_SPECIFIER")\n",
                        length_remaining, sizeof(mms->in_buffer));
                 return AVERROR_INVALIDDATA;
             }
@@ -324,23 +331,23 @@ static MMSSCPacketType get_tcp_server_response(MMSTContext *mmst)
                 av_log(NULL, AV_LOG_ERROR,
                        "Failed to read packet data of size %d: %d (%s)\n",
                        length_remaining, read_result,
-                       read_result < 0 ? strerror(read_result) :
+                       read_result < 0 ? strerror(AVUNERROR(read_result)) :
                            "The server closed the connection");
                 return read_result < 0 ? read_result : AVERROR(EIO);
             }
 
             // if we successfully read everything.
             if(packet_id_type == mmst->header_packet_id) {
+                int err;
                 packet_type = SC_PKT_ASF_HEADER;
                 // Store the asf header
                 if(!mms->header_parsed) {
-                    void *p = av_realloc(mms->asf_header,
-                                  mms->asf_header_size + mms->remaining_in_len);
-                    if (!p) {
-                        av_freep(&mms->asf_header);
-                        return AVERROR(ENOMEM);
+                    if ((err = av_reallocp(&mms->asf_header,
+                                           mms->asf_header_size +
+                                           mms->remaining_in_len)) < 0) {
+                        mms->asf_header_size = 0;
+                        return err;
                     }
-                    mms->asf_header = p;
                     memcpy(mms->asf_header + mms->asf_header_size,
                            mms->read_in_ptr, mms->remaining_in_len);
                     mms->asf_header_size += mms->remaining_in_len;
@@ -417,6 +424,7 @@ static int send_media_header_request(MMSTContext *mmst)
 static int send_startup_packet(MMSTContext *mmst)
 {
     char data_string[256];
+    int ret;
     MMSContext *mms = &mmst->mms;
     // SubscriberName is defined in MS specification linked below.
     // The guid value can be any valid value.
@@ -429,7 +437,8 @@ static int send_startup_packet(MMSTContext *mmst)
     start_command_packet(mmst, CS_PKT_INITIAL);
     insert_command_prefixes(mms, 0, 0x0004000b);
     bytestream_put_le32(&mms->write_out_ptr, 0x0003001c);
-    mms_put_utf16(mms, data_string);
+    if ((ret = mms_put_utf16(mms, data_string)) < 0)
+        return ret;
     return send_command_packet(mmst);
 }
 

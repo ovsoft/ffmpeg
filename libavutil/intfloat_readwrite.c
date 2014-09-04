@@ -26,9 +26,12 @@
  */
 
 #include <stdint.h>
+#include "common.h"
 #include "mathematics.h"
 #include "intfloat_readwrite.h"
+#include "version.h"
 
+#if FF_API_INTFLOAT
 double av_int2dbl(int64_t v){
     if((uint64_t)v+v > 0xFFEULL<<52)
         return NAN;
@@ -88,10 +91,11 @@ AVExtFloat av_dbl2ext(double d){
             ext.mantissa[i] = m>>(56-(i<<3));
     } else if (f != 0.0) {
         ext.exponent[0] = 0x7f; ext.exponent[1] = 0xff;
-        if (f != INFINITY)
+        if (!isinf(f))
             ext.mantissa[0] = ~0;
     }
     if (d < 0)
         ext.exponent[0] |= 0x80;
     return ext;
 }
+#endif /* FF_API_INTFLOAT */

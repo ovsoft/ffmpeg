@@ -26,10 +26,13 @@
  */
 
 #include "libavutil/avstring.h"
+#include "libavutil/common.h"
 #include "libavutil/libm.h"
 #include "libavutil/samplefmt.h"
 #include "avcodec.h"
 #include "audioconvert.h"
+
+#if FF_API_AUDIO_CONVERT
 
 struct AVAudioConvert {
     int in_channels, out_channels;
@@ -113,3 +116,5 @@ if(ctx->fmt_pair == ofmt + AV_SAMPLE_FMT_NB*ifmt){\
     }
     return 0;
 }
+
+#endif /* FF_API_AUDIO_CONVERT */

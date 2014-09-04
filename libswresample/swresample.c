@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Michael Niedermayer (michaelni@gmx.at)
+ * Copyright (C) 2011-2013 Michael Niedermayer (michaelni@gmx.at)
  *
  * This file is part of libswresample
  *
@@ -22,88 +22,11 @@
 #include "swresample_internal.h"
 #include "audioconvert.h"
 #include "libavutil/avassert.h"
-#include "libavutil/audioconvert.h"
+#include "libavutil/channel_layout.h"
 
 #include <float.h>
 
-#define  C30DB  M_SQRT2
-#define  C15DB  1.189207115
-#define C__0DB  1.0
-#define C_15DB  0.840896415
-#define C_30DB  M_SQRT1_2
-#define C_45DB  0.594603558
-#define C_60DB  0.5
-
 #define ALIGN 32
-
-//TODO split options array out?
-#define OFFSET(x) offsetof(SwrContext,x)
-#define PARAM AV_OPT_FLAG_AUDIO_PARAM
-
-static const AVOption options[]={
-{"ich"                  ,  "Input Channel Count"        , OFFSET( in.ch_count   ), AV_OPT_TYPE_INT  , {.dbl=2                     }, 0      , SWR_CH_MAX, PARAM},
-{"in_channel_count"     ,  "Input Channel Count"        , OFFSET( in.ch_count   ), AV_OPT_TYPE_INT  , {.dbl=2                     }, 0      , SWR_CH_MAX, PARAM},
-{"och"                  , "Output Channel Count"        , OFFSET(out.ch_count   ), AV_OPT_TYPE_INT  , {.dbl=2                     }, 0      , SWR_CH_MAX, PARAM},
-{"out_channel_count"    , "Output Channel Count"        , OFFSET(out.ch_count   ), AV_OPT_TYPE_INT  , {.dbl=2                     }, 0      , SWR_CH_MAX, PARAM},
-{"uch"                  ,   "Used Channel Count"        , OFFSET(used_ch_count  ), AV_OPT_TYPE_INT  , {.dbl=0                     }, 0      , SWR_CH_MAX, PARAM},
-{"used_channel_count"   ,   "Used Channel Count"        , OFFSET(used_ch_count  ), AV_OPT_TYPE_INT  , {.dbl=0                     }, 0      , SWR_CH_MAX, PARAM},
-{"isr"                  ,  "Input Sample Rate"          , OFFSET( in_sample_rate), AV_OPT_TYPE_INT  , {.dbl=0                     }, 0      , INT_MAX   , PARAM},
-{"in_sample_rate"       ,  "Input Sample Rate"          , OFFSET( in_sample_rate), AV_OPT_TYPE_INT  , {.dbl=0                     }, 0      , INT_MAX   , PARAM},
-{"osr"                  , "Output Sample Rate"          , OFFSET(out_sample_rate), AV_OPT_TYPE_INT  , {.dbl=0                     }, 0      , INT_MAX   , PARAM},
-{"out_sample_rate"      , "Output Sample Rate"          , OFFSET(out_sample_rate), AV_OPT_TYPE_INT  , {.dbl=0                     }, 0      , INT_MAX   , PARAM},
-{"isf"                  ,    "Input Sample Format"      , OFFSET( in_sample_fmt ), AV_OPT_TYPE_INT  , {.dbl=AV_SAMPLE_FMT_NONE    }, -1     , AV_SAMPLE_FMT_NB-1+256, PARAM},
-{"in_sample_fmt"        ,    "Input Sample Format"      , OFFSET( in_sample_fmt ), AV_OPT_TYPE_INT  , {.dbl=AV_SAMPLE_FMT_NONE    }, -1     , AV_SAMPLE_FMT_NB-1+256, PARAM},
-{"osf"                  ,   "Output Sample Format"      , OFFSET(out_sample_fmt ), AV_OPT_TYPE_INT  , {.dbl=AV_SAMPLE_FMT_NONE    }, -1     , AV_SAMPLE_FMT_NB-1+256, PARAM},
-{"out_sample_fmt"       ,   "Output Sample Format"      , OFFSET(out_sample_fmt ), AV_OPT_TYPE_INT  , {.dbl=AV_SAMPLE_FMT_NONE    }, -1     , AV_SAMPLE_FMT_NB-1+256, PARAM},
-{"tsf"                  , "Internal Sample Format"      , OFFSET(int_sample_fmt ), AV_OPT_TYPE_INT  , {.dbl=AV_SAMPLE_FMT_NONE    }, -1     , AV_SAMPLE_FMT_FLTP, PARAM},
-{"internal_sample_fmt"  , "Internal Sample Format"      , OFFSET(int_sample_fmt ), AV_OPT_TYPE_INT  , {.dbl=AV_SAMPLE_FMT_NONE    }, -1     , AV_SAMPLE_FMT_FLTP, PARAM},
-{"icl"                  ,   "Input Channel Layout"      , OFFSET( in_ch_layout  ), AV_OPT_TYPE_INT64, {.dbl=0                     }, 0      , INT64_MAX , PARAM, "channel_layout"},
-{"in_channel_layout"    ,   "Input Channel Layout"      , OFFSET( in_ch_layout  ), AV_OPT_TYPE_INT64, {.dbl=0                     }, 0      , INT64_MAX , PARAM, "channel_layout"},
-{"ocl"                  ,  "Output Channel Layout"      , OFFSET(out_ch_layout  ), AV_OPT_TYPE_INT64, {.dbl=0                     }, 0      , INT64_MAX , PARAM, "channel_layout"},
-{"out_channel_layout"   ,  "Output Channel Layout"      , OFFSET(out_ch_layout  ), AV_OPT_TYPE_INT64, {.dbl=0                     }, 0      , INT64_MAX , PARAM, "channel_layout"},
-{"clev"                 ,    "Center Mix Level"         , OFFSET(clev           ), AV_OPT_TYPE_FLOAT, {.dbl=C_30DB                }, -32    , 32        , PARAM},
-{"center_mix_level"     ,    "Center Mix Level"         , OFFSET(clev           ), AV_OPT_TYPE_FLOAT, {.dbl=C_30DB                }, -32    , 32        , PARAM},
-{"slev"                 , "Sourround Mix Level"         , OFFSET(slev           ), AV_OPT_TYPE_FLOAT, {.dbl=C_30DB                }, -32    , 32        , PARAM},
-{"surround_mix_level"   , "Sourround Mix Level"         , OFFSET(slev           ), AV_OPT_TYPE_FLOAT, {.dbl=C_30DB                }, -32    , 32        , PARAM},
-{"lfe_mix_level"        , "LFE Mix Level"               , OFFSET(lfe_mix_level  ), AV_OPT_TYPE_FLOAT, {.dbl=0                     }, -32    , 32        , PARAM},
-{"rmvol"                , "Rematrix Volume"             , OFFSET(rematrix_volume), AV_OPT_TYPE_FLOAT, {.dbl=1.0                   }, -1000  , 1000      , PARAM},
-{"rematrix_volume"      , "Rematrix Volume"             , OFFSET(rematrix_volume), AV_OPT_TYPE_FLOAT, {.dbl=1.0                   }, -1000  , 1000      , PARAM},
-{"flags"                , NULL                          , OFFSET(flags          ), AV_OPT_TYPE_FLAGS, {.dbl=0                     }, 0      , UINT_MAX  , PARAM, "flags"},
-{"swr_flags"            , NULL                          , OFFSET(flags          ), AV_OPT_TYPE_FLAGS, {.dbl=0                     }, 0      , UINT_MAX  , PARAM, "flags"},
-{"res"                  , "Force Resampling"            , 0                      , AV_OPT_TYPE_CONST, {.dbl=SWR_FLAG_RESAMPLE     }, INT_MIN, INT_MAX   , PARAM, "flags"},
-{"dither_scale"         , "Dither Scale"                , OFFSET(dither_scale   ), AV_OPT_TYPE_FLOAT, {.dbl=1                     }, 0      , INT_MAX   , PARAM},
-{"dither_method"        , "Dither Method"               , OFFSET(dither_method  ), AV_OPT_TYPE_INT  , {.dbl=0                     }, 0      , SWR_DITHER_NB-1, PARAM, "dither_method"},
-{"rectangular"          , "Rectangular Dither"          , 0                      , AV_OPT_TYPE_CONST, {.dbl=SWR_DITHER_RECTANGULAR}, INT_MIN, INT_MAX   , PARAM, "dither_method"},
-{"triangular"           ,  "Triangular Dither"          , 0                      , AV_OPT_TYPE_CONST, {.dbl=SWR_DITHER_TRIANGULAR }, INT_MIN, INT_MAX   , PARAM, "dither_method"},
-{"triangular_hp"        , "Triangular Dither With High Pass" , 0                 , AV_OPT_TYPE_CONST, {.dbl=SWR_DITHER_TRIANGULAR_HIGHPASS }, INT_MIN, INT_MAX, PARAM, "dither_method"},
-{"filter_size"          , "Resampling Filter Size"      , OFFSET(filter_size)    , AV_OPT_TYPE_INT  , {.dbl=16                    }, 0      , INT_MAX   , PARAM },
-{"phase_shift"          , "Resampling Phase Shift"      , OFFSET(phase_shift)    , AV_OPT_TYPE_INT  , {.dbl=10                    }, 0      , 30        , PARAM },
-{"linear_interp"        , "Use Linear Interpolation"    , OFFSET(linear_interp)  , AV_OPT_TYPE_INT  , {.dbl=0                     }, 0      , 1         , PARAM },
-{"cutoff"               , "Cutoff Frequency Ratio"      , OFFSET(cutoff)         , AV_OPT_TYPE_DOUBLE,{.dbl=0.8                   }, 0      , 1         , PARAM },
-{"min_comp"             , "Minimum difference between timestamps and audio data (in seconds) below which no timestamp compensation of either kind is applied"
-                                                        , OFFSET(min_compensation),AV_OPT_TYPE_FLOAT ,{.dbl=FLT_MAX               }, 0      , FLT_MAX   , PARAM },
-{"min_hard_comp"        , "Minimum difference between timestamps and audio data (in seconds) to trigger padding/trimming the data."
-                                                   , OFFSET(min_hard_compensation),AV_OPT_TYPE_FLOAT ,{.dbl=0.1                   }, 0      , INT_MAX   , PARAM },
-{"comp_duration"        , "Duration (in seconds) over which data is stretched/squeezeed to make it match the timestamps."
-                                              , OFFSET(soft_compensation_duration),AV_OPT_TYPE_FLOAT ,{.dbl=1                     }, 0      , INT_MAX   , PARAM },
-{"max_soft_comp"        , "Maximum factor by which data is stretched/squeezeed to make it match the timestamps."
-                                                   , OFFSET(max_soft_compensation),AV_OPT_TYPE_FLOAT ,{.dbl=0                     }, 0      , INT_MAX   , PARAM },
-
-{0}
-};
-
-static const char* context_to_name(void* ptr) {
-    return "SWR";
-}
-
-static const AVClass av_class = {
-    .class_name                = "SwrContext",
-    .item_name                 = context_to_name,
-    .option                    = options,
-    .version                   = LIBAVUTIL_VERSION_INT,
-    .log_level_offset_offset   = OFFSET(log_level_offset),
-    .parent_log_context_offset = OFFSET(log_ctx),
-};
 
 unsigned swresample_version(void)
 {
@@ -127,20 +50,6 @@ int swr_set_channel_mapping(struct SwrContext *s, const int *channel_map){
         return AVERROR(EINVAL);
     s->channel_map = channel_map;
     return 0;
-}
-
-const AVClass *swr_get_class(void)
-{
-    return &av_class;
-}
-
-struct SwrContext *swr_alloc(void){
-    SwrContext *s= av_mallocz(sizeof(SwrContext));
-    if(s){
-        s->av_class= &av_class;
-        av_opt_set_defaults(s);
-    }
-    return s;
 }
 
 struct SwrContext *swr_alloc_set_opts(struct SwrContext *s,
@@ -177,39 +86,47 @@ static void free_temp(AudioData *a){
     memset(a, 0, sizeof(*a));
 }
 
-void swr_free(SwrContext **ss){
-    SwrContext *s= *ss;
-    if(s){
-        free_temp(&s->postin);
-        free_temp(&s->midbuf);
-        free_temp(&s->preout);
-        free_temp(&s->in_buffer);
-        free_temp(&s->dither);
-        swri_audio_convert_free(&s-> in_convert);
-        swri_audio_convert_free(&s->out_convert);
-        swri_audio_convert_free(&s->full_convert);
-        swri_resample_free(&s->resample);
-        swri_rematrix_free(s);
-    }
-
-    av_freep(ss);
-}
-
-int swr_init(struct SwrContext *s){
+static void clear_context(SwrContext *s){
     s->in_buffer_index= 0;
     s->in_buffer_count= 0;
     s->resample_in_constraint= 0;
+    memset(s->in.ch, 0, sizeof(s->in.ch));
+    memset(s->out.ch, 0, sizeof(s->out.ch));
     free_temp(&s->postin);
     free_temp(&s->midbuf);
     free_temp(&s->preout);
     free_temp(&s->in_buffer);
-    free_temp(&s->dither);
+    free_temp(&s->silence);
+    free_temp(&s->drop_temp);
+    free_temp(&s->dither.noise);
+    free_temp(&s->dither.temp);
     swri_audio_convert_free(&s-> in_convert);
     swri_audio_convert_free(&s->out_convert);
     swri_audio_convert_free(&s->full_convert);
     swri_rematrix_free(s);
 
     s->flushed = 0;
+}
+
+av_cold void swr_free(SwrContext **ss){
+    SwrContext *s= *ss;
+    if(s){
+        clear_context(s);
+        if (s->resampler)
+            s->resampler->free(&s->resample);
+    }
+
+    av_freep(ss);
+}
+
+av_cold void swr_close(SwrContext *s){
+    clear_context(s);
+}
+
+av_cold int swr_init(struct SwrContext *s){
+    int ret;
+
+    clear_context(s);
 
     if(s-> in_sample_fmt >= AV_SAMPLE_FMT_NB){
         av_log(s, AV_LOG_ERROR, "Requested input sample format %d is invalid\n", s->in_sample_fmt);
@@ -220,39 +137,25 @@ int swr_init(struct SwrContext *s){
         return AVERROR(EINVAL);
     }
 
-    if(s->int_sample_fmt == AV_SAMPLE_FMT_NONE){
-        if(av_get_planar_sample_fmt(s->in_sample_fmt) <= AV_SAMPLE_FMT_S16P){
-            s->int_sample_fmt= AV_SAMPLE_FMT_S16P;
-        }else if(av_get_planar_sample_fmt(s->in_sample_fmt) <= AV_SAMPLE_FMT_FLTP){
-            s->int_sample_fmt= AV_SAMPLE_FMT_FLTP;
-        }else{
-            av_log(s, AV_LOG_DEBUG, "Using double precission mode\n");
-            s->int_sample_fmt= AV_SAMPLE_FMT_DBLP;
-        }
+    if(av_get_channel_layout_nb_channels(s-> in_ch_layout) > SWR_CH_MAX) {
+        av_log(s, AV_LOG_WARNING, "Input channel layout 0x%"PRIx64" is invalid or unsupported.\n", s-> in_ch_layout);
+        s->in_ch_layout = 0;
     }
 
-    if(   s->int_sample_fmt != AV_SAMPLE_FMT_S16P
-        &&s->int_sample_fmt != AV_SAMPLE_FMT_S32P
-        &&s->int_sample_fmt != AV_SAMPLE_FMT_FLTP
-        &&s->int_sample_fmt != AV_SAMPLE_FMT_DBLP){
-        av_log(s, AV_LOG_ERROR, "Requested sample format %s is not supported internally, S16/S32/FLT/DBL is supported\n", av_get_sample_fmt_name(s->int_sample_fmt));
-        return AVERROR(EINVAL);
+    if(av_get_channel_layout_nb_channels(s->out_ch_layout) > SWR_CH_MAX) {
+        av_log(s, AV_LOG_WARNING, "Output channel layout 0x%"PRIx64" is invalid or unsupported.\n", s->out_ch_layout);
+        s->out_ch_layout = 0;
     }
 
-    set_audiodata_fmt(&s-> in, s-> in_sample_fmt);
-    set_audiodata_fmt(&s->out, s->out_sample_fmt);
-
-    if (s->out_sample_rate!=s->in_sample_rate || (s->flags & SWR_FLAG_RESAMPLE)){
-        s->resample = swri_resample_init(s->resample, s->out_sample_rate, s->in_sample_rate, s->filter_size, s->phase_shift, s->linear_interp, s->cutoff, s->int_sample_fmt);
-    }else
-        swri_resample_free(&s->resample);
-    if(    s->int_sample_fmt != AV_SAMPLE_FMT_S16P
-        && s->int_sample_fmt != AV_SAMPLE_FMT_S32P
-        && s->int_sample_fmt != AV_SAMPLE_FMT_FLTP
-        && s->int_sample_fmt != AV_SAMPLE_FMT_DBLP
-        && s->resample){
-        av_log(s, AV_LOG_ERROR, "Resampling only supported with internal s16/s32/flt/dbl\n");
-        return -1;
+    switch(s->engine){
+#if CONFIG_LIBSOXR
+        extern struct Resampler const soxr_resampler;
+        case SWR_ENGINE_SOXR: s->resampler = &soxr_resampler; break;
+#endif
+        case SWR_ENGINE_SWR : s->resampler = &swri_resampler; break;
+        default:
+            av_log(s, AV_LOG_ERROR, "Requested resampling engine is unavailable\n");
+            return AVERROR(EINVAL);
     }
 
     if(!s->used_ch_count)
@@ -271,6 +174,62 @@ int swr_init(struct SwrContext *s){
     s->rematrix= s->out_ch_layout  !=s->in_ch_layout || s->rematrix_volume!=1.0 ||
                  s->rematrix_custom;
 
+    if(s->int_sample_fmt == AV_SAMPLE_FMT_NONE){
+        if(av_get_planar_sample_fmt(s->in_sample_fmt) <= AV_SAMPLE_FMT_S16P){
+            s->int_sample_fmt= AV_SAMPLE_FMT_S16P;
+        }else if(   av_get_planar_sample_fmt(s-> in_sample_fmt) == AV_SAMPLE_FMT_S32P
+                 && av_get_planar_sample_fmt(s->out_sample_fmt) == AV_SAMPLE_FMT_S32P
+                 && !s->rematrix
+                 && s->engine != SWR_ENGINE_SOXR){
+            s->int_sample_fmt= AV_SAMPLE_FMT_S32P;
+        }else if(av_get_planar_sample_fmt(s->in_sample_fmt) <= AV_SAMPLE_FMT_FLTP){
+            s->int_sample_fmt= AV_SAMPLE_FMT_FLTP;
+        }else{
+            av_log(s, AV_LOG_DEBUG, "Using double precision mode\n");
+            s->int_sample_fmt= AV_SAMPLE_FMT_DBLP;
+        }
+    }
+
+    if(   s->int_sample_fmt != AV_SAMPLE_FMT_S16P
+        &&s->int_sample_fmt != AV_SAMPLE_FMT_S32P
+        &&s->int_sample_fmt != AV_SAMPLE_FMT_FLTP
+        &&s->int_sample_fmt != AV_SAMPLE_FMT_DBLP){
+        av_log(s, AV_LOG_ERROR, "Requested sample format %s is not supported internally, S16/S32/FLT/DBL is supported\n", av_get_sample_fmt_name(s->int_sample_fmt));
+        return AVERROR(EINVAL);
+    }
+
+    set_audiodata_fmt(&s-> in, s-> in_sample_fmt);
+    set_audiodata_fmt(&s->out, s->out_sample_fmt);
+
+    if (s->firstpts_in_samples != AV_NOPTS_VALUE) {
+        if (!s->async && s->min_compensation >= FLT_MAX/2)
+            s->async = 1;
+        s->firstpts =
+        s->outpts   = s->firstpts_in_samples * s->out_sample_rate;
+    } else
+        s->firstpts = AV_NOPTS_VALUE;
+
+    if (s->async) {
+        if (s->min_compensation >= FLT_MAX/2)
+            s->min_compensation = 0.001;
+        if (s->async > 1.0001) {
+            s->max_soft_compensation = s->async / (double) s->in_sample_rate;
+        }
+    }
+
+    if (s->out_sample_rate!=s->in_sample_rate || (s->flags & SWR_FLAG_RESAMPLE)){
+        s->resample = s->resampler->init(s->resample, s->out_sample_rate, s->in_sample_rate, s->filter_size, s->phase_shift, s->linear_interp, s->cutoff, s->int_sample_fmt, s->filter_type, s->kaiser_beta, s->precision, s->cheby);
+    }else
+        s->resampler->free(&s->resample);
+    if(    s->int_sample_fmt != AV_SAMPLE_FMT_S16P
+        && s->int_sample_fmt != AV_SAMPLE_FMT_S32P
+        && s->int_sample_fmt != AV_SAMPLE_FMT_FLTP
+        && s->int_sample_fmt != AV_SAMPLE_FMT_DBLP
+        && s->resample){
+        av_log(s, AV_LOG_ERROR, "Resampling only supported with internal s16/s32/flt/dbl\n");
+        return -1;
+    }
+
 #define RSC 1 //FIXME finetune
     if(!s-> in.ch_count)
         s-> in.ch_count= av_get_channel_layout_nb_channels(s-> in_ch_layout);
@@ -286,7 +245,11 @@ int swr_init(struct SwrContext *s){
     }
 
     if ((!s->out_ch_layout || !s->in_ch_layout) && s->used_ch_count != s->out.ch_count && !s->rematrix_custom) {
-        av_log(s, AV_LOG_ERROR, "Rematrix is needed but there is not enough information to do it\n");
+        char l1[1024], l2[1024];
+        av_get_channel_layout_string(l1, sizeof(l1), s-> in.ch_count, s-> in_ch_layout);
+        av_get_channel_layout_string(l2, sizeof(l2), s->out.ch_count, s->out_ch_layout);
+        av_log(s, AV_LOG_ERROR, "Rematrix is needed between %s and %s "
+               "but there is not enough information to do it\n", l1, l2);
         return -1;
     }
 
@@ -295,8 +258,10 @@ av_assert0(s->out.ch_count);
     s->resample_first= RSC*s->out.ch_count/s->in.ch_count - RSC < s->out_sample_rate/(float)s-> in_sample_rate - 1.0;
 
     s->in_buffer= s->in;
+    s->silence  = s->in;
+    s->drop_temp= s->out;
 
-    if(!s->resample && !s->rematrix && !s->channel_map && !s->dither_method){
+    if(!s->resample && !s->rematrix && !s->channel_map && !s->dither.method){
         s->full_convert = swri_audio_convert_alloc(s->out_sample_fmt,
                                                    s-> in_sample_fmt, s-> in.ch_count, NULL, 0);
         return 0;
@@ -307,6 +272,8 @@ av_assert0(s->out.ch_count);
     s->out_convert= swri_audio_convert_alloc(s->out_sample_fmt,
                                              s->int_sample_fmt, s->out.ch_count, NULL, 0);
 
+    if (!s->in_convert || !s->out_convert)
+        return AVERROR(ENOMEM);
 
     s->postin= s->in;
     s->preout= s->out;
@@ -332,15 +299,16 @@ av_assert0(s->out.ch_count);
         set_audiodata_fmt(&s->in_buffer, s->int_sample_fmt);
     }
 
-    s->dither = s->preout;
+    if ((ret = swri_dither_init(s, s->out_sample_fmt, s->int_sample_fmt)) < 0)
+        return ret;
 
-    if(s->rematrix || s->dither_method)
+    if(s->rematrix || s->dither.method)
         return swri_rematrix_init(s);
 
     return 0;
 }
 
-static int realloc_audio(AudioData *a, int count){
+int swri_realloc_audio(AudioData *a, int count){
     int i, countb;
     AudioData old;
 
@@ -358,7 +326,7 @@ static int realloc_audio(AudioData *a, int count){
     av_assert0(a->bps);
     av_assert0(a->ch_count);
 
-    a->data= av_malloc(countb*a->ch_count);
+    a->data= av_mallocz(countb*a->ch_count);
     if(!a->data)
         return AVERROR(ENOMEM);
     for(i=0; i<a->ch_count; i++){
@@ -366,7 +334,7 @@ static int realloc_audio(AudioData *a, int count){
         if(a->planar) memcpy(a->ch[i], old.ch[i], a->count*a->bps);
     }
     if(!a->planar) memcpy(a->ch[0], old.ch[0], a->count*a->ch_count*a->bps);
-    av_free(old.data);
+    av_freep(&old.data);
     a->count= count;
 
     return 1;
@@ -432,6 +400,7 @@ static int resample(SwrContext *s, AudioData *out_param, int out_count,
     AudioData in, out, tmp;
     int ret_sum=0;
     int border=0;
+    int padless = ARCH_X86 && s->engine == SWR_ENGINE_SWR ? 7 : 0;
 
     av_assert1(s->in_buffer.ch_count == in_param->ch_count);
     av_assert1(s->in_buffer.planar   == in_param->planar);
@@ -440,11 +409,17 @@ static int resample(SwrContext *s, AudioData *out_param, int out_count,
     tmp=out=*out_param;
     in =  *in_param;
 
+    border = s->resampler->invert_initial_buffer(s->resample, &s->in_buffer,
+                 &in, in_count, &s->in_buffer_index, &s->in_buffer_count);
+    if (border == INT_MAX) return 0;
+    else if (border < 0) return border;
+    else if (border) { buf_set(&in, &in, border); in_count -= border; s->resample_in_constraint = 0; }
+
     do{
         int ret, size, consumed;
         if(!s->resample_in_constraint && s->in_buffer_count){
             buf_set(&tmp, &s->in_buffer, s->in_buffer_index);
-            ret= swri_multiple_resample(s->resample, &out, out_count, &tmp, s->in_buffer_count, &consumed);
+            ret= s->resampler->multiple_resample(s->resample, &out, out_count, &tmp, s->in_buffer_count, &consumed);
             out_count -= ret;
             ret_sum += ret;
             buf_set(&out, &out, ret);
@@ -462,9 +437,9 @@ static int resample(SwrContext *s, AudioData *out_param, int out_count,
             }
         }
 
-        if(in_count && !s->in_buffer_count){
+        if((s->flushed || in_count > padless) && !s->in_buffer_count){
             s->in_buffer_index=0;
-            ret= swri_multiple_resample(s->resample, &out, out_count, &in, in_count, &consumed);
+            ret= s->resampler->multiple_resample(s->resample, &out, out_count, &in, FFMAX(in_count-padless, 0), &consumed);
             out_count -= ret;
             ret_sum += ret;
             buf_set(&out, &out, ret);
@@ -480,7 +455,7 @@ static int resample(SwrContext *s, AudioData *out_param, int out_count,
             copy(&s->in_buffer, &tmp, s->in_buffer_count);
             s->in_buffer_index=0;
         }else
-            if((ret=realloc_audio(&s->in_buffer, size)) < 0)
+            if((ret=swri_realloc_audio(&s->in_buffer, size)) < 0)
                 return ret;
 
         if(in_count){
@@ -496,6 +471,10 @@ static int resample(SwrContext *s, AudioData *out_param, int out_count,
             s->resample_in_constraint= 0;
             if(s->in_buffer_count != count || in_count)
                 continue;
+            if (padless) {
+                padless = 0;
+                continue;
+            }
         }
         break;
     }while(1);
@@ -520,18 +499,18 @@ static int swr_convert_internal(struct SwrContext *s, AudioData *out, int out_co
 //     in_max= out_count*(int64_t)s->in_sample_rate / s->out_sample_rate + resample_filter_taps;
 //     in_count= FFMIN(in_count, in_in + 2 - s->hist_buffer_count);
 
-    if((ret=realloc_audio(&s->postin, in_count))<0)
+    if((ret=swri_realloc_audio(&s->postin, in_count))<0)
         return ret;
     if(s->resample_first){
         av_assert0(s->midbuf.ch_count == s->used_ch_count);
-        if((ret=realloc_audio(&s->midbuf, out_count))<0)
+        if((ret=swri_realloc_audio(&s->midbuf, out_count))<0)
             return ret;
     }else{
         av_assert0(s->midbuf.ch_count ==  s->out.ch_count);
-        if((ret=realloc_audio(&s->midbuf,  in_count))<0)
+        if((ret=swri_realloc_audio(&s->midbuf,  in_count))<0)
             return ret;
     }
-    if((ret=realloc_audio(&s->preout, out_count))<0)
+    if((ret=swri_realloc_audio(&s->preout, out_count))<0)
         return ret;
 
     postin= &s->postin;
@@ -541,7 +520,7 @@ static int swr_convert_internal(struct SwrContext *s, AudioData *out, int out_co
     preout_tmp= s->preout;
     preout= &preout_tmp;
 
-    if(s->int_sample_fmt == s-> in_sample_fmt && s->in.planar)
+    if(s->int_sample_fmt == s-> in_sample_fmt && s->in.planar && !s->channel_map)
         postin= in;
 
     if(s->resample_first ? !s->resample : !s->rematrix)
@@ -550,7 +529,8 @@ static int swr_convert_internal(struct SwrContext *s, AudioData *out, int out_co
     if(s->resample_first ? !s->rematrix : !s->resample)
         preout= midbuf;
 
-    if(s->int_sample_fmt == s->out_sample_fmt && s->out.planar){
+    if(s->int_sample_fmt == s->out_sample_fmt && s->out.planar
+       && !(s->out_sample_fmt==AV_SAMPLE_FMT_S32P && (s->dither.output_sample_bits&31))){
         if(preout==in){
             out_count= FFMIN(out_count, in_count); //TODO check at the end if this is needed or redundant
             av_assert0(s->in.planar); //we only support planar internally so it has to be, we support copying non planar though
@@ -579,30 +559,60 @@ static int swr_convert_internal(struct SwrContext *s, AudioData *out, int out_co
     }
 
     if(preout != out && out_count){
-        if(s->dither_method){
+        AudioData *conv_src = preout;
+        if(s->dither.method){
             int ch;
             int dither_count= FFMAX(out_count, 1<<16);
-            av_assert0(preout != in);
 
-            if((ret=realloc_audio(&s->dither, dither_count))<0)
+            if (preout == in) {
+                conv_src = &s->dither.temp;
+                if((ret=swri_realloc_audio(&s->dither.temp, dither_count))<0)
+                    return ret;
+            }
+
+            if((ret=swri_realloc_audio(&s->dither.noise, dither_count))<0)
                 return ret;
             if(ret)
-                for(ch=0; ch<s->dither.ch_count; ch++)
-                    swri_get_dither(s, s->dither.ch[ch], s->dither.count, 12345678913579<<ch, s->out_sample_fmt, s->int_sample_fmt);
-            av_assert0(s->dither.ch_count == preout->ch_count);
+                for(ch=0; ch<s->dither.noise.ch_count; ch++)
+                    swri_get_dither(s, s->dither.noise.ch[ch], s->dither.noise.count, 12345678913579<<ch, s->dither.noise.fmt);
+            av_assert0(s->dither.noise.ch_count == preout->ch_count);
 
-            if(s->dither_pos + out_count > s->dither.count)
-                s->dither_pos = 0;
+            if(s->dither.noise_pos + out_count > s->dither.noise.count)
+                s->dither.noise_pos = 0;
 
-            for(ch=0; ch<preout->ch_count; ch++)
-                s->mix_2_1_f(preout->ch[ch], preout->ch[ch], s->dither.ch[ch] + s->dither.bps * s->dither_pos, s->native_one, 0, 0, out_count);
+            if (s->dither.method < SWR_DITHER_NS){
+                if (s->mix_2_1_simd) {
+                    int len1= out_count&~15;
+                    int off = len1 * preout->bps;
 
-            s->dither_pos += out_count;
+                    if(len1)
+                        for(ch=0; ch<preout->ch_count; ch++)
+                            s->mix_2_1_simd(conv_src->ch[ch], preout->ch[ch], s->dither.noise.ch[ch] + s->dither.noise.bps * s->dither.noise_pos, s->native_simd_one, 0, 0, len1);
+                    if(out_count != len1)
+                        for(ch=0; ch<preout->ch_count; ch++)
+                            s->mix_2_1_f(conv_src->ch[ch] + off, preout->ch[ch] + off, s->dither.noise.ch[ch] + s->dither.noise.bps * s->dither.noise_pos + off + len1, s->native_one, 0, 0, out_count - len1);
+                } else {
+                    for(ch=0; ch<preout->ch_count; ch++)
+                        s->mix_2_1_f(conv_src->ch[ch], preout->ch[ch], s->dither.noise.ch[ch] + s->dither.noise.bps * s->dither.noise_pos, s->native_one, 0, 0, out_count);
+                }
+            } else {
+                switch(s->int_sample_fmt) {
+                case AV_SAMPLE_FMT_S16P :swri_noise_shaping_int16(s, conv_src, preout, &s->dither.noise, out_count); break;
+                case AV_SAMPLE_FMT_S32P :swri_noise_shaping_int32(s, conv_src, preout, &s->dither.noise, out_count); break;
+                case AV_SAMPLE_FMT_FLTP :swri_noise_shaping_float(s, conv_src, preout, &s->dither.noise, out_count); break;
+                case AV_SAMPLE_FMT_DBLP :swri_noise_shaping_double(s,conv_src, preout, &s->dither.noise, out_count); break;
+                }
+            }
+            s->dither.noise_pos += out_count;
         }
-//FIXME packed doesnt need more than 1 chan here!
-        swri_audio_convert(s->out_convert, out, preout, out_count);
+//FIXME packed doesn't need more than 1 chan here!
+        swri_audio_convert(s->out_convert, out, conv_src, out_count);
     }
     return out_count;
+}
+
+int swr_is_initialized(struct SwrContext *s) {
+    return !!s->in_buffer.ch_count;
 }
 
 int swr_convert(struct SwrContext *s, uint8_t *out_arg[SWR_CH_MAX], int out_count,
@@ -610,47 +620,40 @@ int swr_convert(struct SwrContext *s, uint8_t *out_arg[SWR_CH_MAX], int out_coun
     AudioData * in= &s->in;
     AudioData *out= &s->out;
 
-    if(s->drop_output > 0){
+    if (!swr_is_initialized(s)) {
+        av_log(s, AV_LOG_ERROR, "Context has not been initialized\n");
+        return AVERROR(EINVAL);
+    }
+
+    while(s->drop_output > 0){
         int ret;
-        AudioData tmp = s->out;
         uint8_t *tmp_arg[SWR_CH_MAX];
-        tmp.count = 0;
-        tmp.data  = NULL;
-        if((ret=realloc_audio(&tmp, s->drop_output))<0)
+#define MAX_DROP_STEP 16384
+        if((ret=swri_realloc_audio(&s->drop_temp, FFMIN(s->drop_output, MAX_DROP_STEP)))<0)
             return ret;
 
-        reversefill_audiodata(&tmp, tmp_arg);
+        reversefill_audiodata(&s->drop_temp, tmp_arg);
         s->drop_output *= -1; //FIXME find a less hackish solution
-        ret = swr_convert(s, tmp_arg, -s->drop_output, in_arg, in_count); //FIXME optimize but this is as good as never called so maybe it doesnt matter
+        ret = swr_convert(s, tmp_arg, FFMIN(-s->drop_output, MAX_DROP_STEP), in_arg, in_count); //FIXME optimize but this is as good as never called so maybe it doesn't matter
         s->drop_output *= -1;
-        if(ret>0)
+        in_count = 0;
+        if(ret>0) {
             s->drop_output -= ret;
+            continue;
+        }
 
-        av_freep(&tmp.data);
         if(s->drop_output || !out_arg)
             return 0;
         in_count = 0;
     }
 
     if(!in_arg){
-        if(s->in_buffer_count){
-            if (s->resample && !s->flushed) {
-                AudioData *a= &s->in_buffer;
-                int i, j, ret;
-                if((ret=realloc_audio(a, s->in_buffer_index + 2*s->in_buffer_count)) < 0)
-                    return ret;
-                av_assert0(a->planar);
-                for(i=0; i<a->ch_count; i++){
-                    for(j=0; j<s->in_buffer_count; j++){
-                        memcpy(a->ch[i] + (s->in_buffer_index+s->in_buffer_count+j  )*a->bps,
-                            a->ch[i] + (s->in_buffer_index+s->in_buffer_count-j-1)*a->bps, a->bps);
-                    }
-                }
-                s->in_buffer_count += (s->in_buffer_count+1)/2;
-                s->resample_in_constraint = 0;
-                s->flushed = 1;
-            }
-        }else{
+        if(s->resample){
+            if (!s->flushed)
+                s->resampler->flush(s);
+            s->resample_in_constraint = 0;
+            s->flushed = 1;
+        }else if(!s->in_buffer_count){
             return 0;
         }
     }else
@@ -692,7 +695,7 @@ int swr_convert(struct SwrContext *s, uint8_t *out_arg[SWR_CH_MAX], int out_coun
                     copy(&s->in_buffer, &tmp, s->in_buffer_count);
                     s->in_buffer_index=0;
                 }else
-                    if((ret=realloc_audio(&s->in_buffer, size)) < 0)
+                    if((ret=swri_realloc_audio(&s->in_buffer, size)) < 0)
                         return ret;
             }
 
@@ -729,40 +732,75 @@ int swr_drop_output(struct SwrContext *s, int count){
 
 int swr_inject_silence(struct SwrContext *s, int count){
     int ret, i;
-    AudioData silence = s->out;
     uint8_t *tmp_arg[SWR_CH_MAX];
 
     if(count <= 0)
         return 0;
 
-    silence.count = 0;
-    silence.data  = NULL;
-    if((ret=realloc_audio(&silence, count))<0)
+#define MAX_SILENCE_STEP 16384
+    while (count > MAX_SILENCE_STEP) {
+        if ((ret = swr_inject_silence(s, MAX_SILENCE_STEP)) < 0)
+            return ret;
+        count -= MAX_SILENCE_STEP;
+    }
+
+    if((ret=swri_realloc_audio(&s->silence, count))<0)
         return ret;
 
-    if(silence.planar) for(i=0; i<silence.ch_count; i++) {
-        memset(silence.ch[i], silence.bps==1 ? 0x80 : 0, count*silence.bps);
+    if(s->silence.planar) for(i=0; i<s->silence.ch_count; i++) {
+        memset(s->silence.ch[i], s->silence.bps==1 ? 0x80 : 0, count*s->silence.bps);
     } else
-        memset(silence.ch[0], silence.bps==1 ? 0x80 : 0, count*silence.bps*silence.ch_count);
+        memset(s->silence.ch[0], s->silence.bps==1 ? 0x80 : 0, count*s->silence.bps*s->silence.ch_count);
 
-    reversefill_audiodata(&silence, tmp_arg);
+    reversefill_audiodata(&s->silence, tmp_arg);
     av_log(s, AV_LOG_VERBOSE, "adding %d audio samples of silence\n", count);
     ret = swr_convert(s, NULL, 0, (const uint8_t**)tmp_arg, count);
-    av_freep(&silence.data);
     return ret;
+}
+
+int64_t swr_get_delay(struct SwrContext *s, int64_t base){
+    if (s->resampler && s->resample){
+        return s->resampler->get_delay(s, base);
+    }else{
+        return (s->in_buffer_count*base + (s->in_sample_rate>>1))/ s->in_sample_rate;
+    }
+}
+
+int swr_set_compensation(struct SwrContext *s, int sample_delta, int compensation_distance){
+    int ret;
+
+    if (!s || compensation_distance < 0)
+        return AVERROR(EINVAL);
+    if (!compensation_distance && sample_delta)
+        return AVERROR(EINVAL);
+    if (!s->resample) {
+        s->flags |= SWR_FLAG_RESAMPLE;
+        ret = swr_init(s);
+        if (ret < 0)
+            return ret;
+    }
+    if (!s->resampler->set_compensation){
+        return AVERROR(EINVAL);
+    }else{
+        return s->resampler->set_compensation(s->resample, sample_delta, compensation_distance);
+    }
 }
 
 int64_t swr_next_pts(struct SwrContext *s, int64_t pts){
     if(pts == INT64_MIN)
         return s->outpts;
+
+    if (s->firstpts == AV_NOPTS_VALUE)
+        s->outpts = s->firstpts = pts;
+
     if(s->min_compensation >= FLT_MAX) {
         return (s->outpts = pts - swr_get_delay(s, s->in_sample_rate * (int64_t)s->out_sample_rate));
     } else {
-        int64_t delta = pts - swr_get_delay(s, s->in_sample_rate * (int64_t)s->out_sample_rate) - s->outpts;
+        int64_t delta = pts - swr_get_delay(s, s->in_sample_rate * (int64_t)s->out_sample_rate) - s->outpts + s->drop_output*(int64_t)s->in_sample_rate;
         double fdelta = delta /(double)(s->in_sample_rate * (int64_t)s->out_sample_rate);
 
         if(fabs(fdelta) > s->min_compensation) {
-            if(!s->outpts || fabs(fdelta) > s->min_hard_compensation){
+            if(s->outpts == s->firstpts || fabs(fdelta) > s->min_hard_compensation){
                 int ret;
                 if(delta > 0) ret = swr_inject_silence(s,  delta / s->out_sample_rate);
                 else          ret = swr_drop_output   (s, -delta / s-> in_sample_rate);
@@ -771,7 +809,8 @@ int64_t swr_next_pts(struct SwrContext *s, int64_t pts){
                 }
             } else if(s->soft_compensation_duration && s->max_soft_compensation) {
                 int duration = s->out_sample_rate * s->soft_compensation_duration;
-                int comp = av_clipf(fdelta, -s->max_soft_compensation, s->max_soft_compensation) * duration ;
+                double max_soft_compensation = s->max_soft_compensation / (s->max_soft_compensation < 0 ? -s->in_sample_rate : 1);
+                int comp = av_clipf(fdelta, -max_soft_compensation, max_soft_compensation) * duration ;
                 av_log(s, AV_LOG_VERBOSE, "compensating audio timestamp drift:%f compensation:%d in:%d\n", fdelta, comp, duration);
                 swr_set_compensation(s, comp, duration);
             }

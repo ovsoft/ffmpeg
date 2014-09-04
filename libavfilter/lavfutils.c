@@ -22,7 +22,7 @@
 #include "lavfutils.h"
 
 int ff_load_image(uint8_t *data[4], int linesize[4],
-                  int *w, int *h, enum PixelFormat *pix_fmt,
+                  int *w, int *h, enum AVPixelFormat *pix_fmt,
                   const char *filename, void *log_ctx)
 {
     AVInputFormat *iformat = NULL;
@@ -33,12 +33,19 @@ int ff_load_image(uint8_t *data[4], int linesize[4],
     int frame_decoded, ret = 0;
     AVPacket pkt;
 
+    av_init_packet(&pkt);
+
     av_register_all();
 
     iformat = av_find_input_format("image2");
     if ((ret = avformat_open_input(&format_ctx, filename, iformat, NULL)) < 0) {
         av_log(log_ctx, AV_LOG_ERROR,
                "Failed to open input file '%s'\n", filename);
+        return ret;
+    }
+
+    if ((ret = avformat_find_stream_info(format_ctx, NULL)) < 0) {
+        av_log(log_ctx, AV_LOG_ERROR, "Find stream info failed\n");
         return ret;
     }
 
@@ -55,7 +62,7 @@ int ff_load_image(uint8_t *data[4], int linesize[4],
         goto end;
     }
 
-    if (!(frame = avcodec_alloc_frame()) ) {
+    if (!(frame = av_frame_alloc()) ) {
         av_log(log_ctx, AV_LOG_ERROR, "Failed to alloc frame\n");
         ret = AVERROR(ENOMEM);
         goto end;
@@ -82,13 +89,12 @@ int ff_load_image(uint8_t *data[4], int linesize[4],
         goto end;
     ret = 0;
 
-    av_image_copy(data, linesize, frame->data, frame->linesize, *pix_fmt, *w, *h);
+    av_image_copy(data, linesize, (const uint8_t **)frame->data, frame->linesize, *pix_fmt, *w, *h);
 
 end:
-    if (codec_ctx)
-        avcodec_close(codec_ctx);
-    if (format_ctx)
-        avformat_close_input(&format_ctx);
+    av_free_packet(&pkt);
+    avcodec_close(codec_ctx);
+    avformat_close_input(&format_ctx);
     av_freep(&frame);
 
     if (ret < 0)

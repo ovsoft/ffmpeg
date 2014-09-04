@@ -22,6 +22,7 @@
 
 #include "parser.h"
 #include "mpegaudiodecheader.h"
+#include "libavutil/common.h"
 
 
 typedef struct MpegAudioParseContext {
@@ -63,10 +64,11 @@ static int mpegaudio_parse(AVCodecParserContext *s1,
         }else{
             while(i<buf_size){
                 int ret, sr, channels, bit_rate, frame_size;
+                enum AVCodecID codec_id;
 
                 state= (state<<8) + buf[i++];
 
-                ret = avpriv_mpa_decode_header(avctx, state, &sr, &channels, &frame_size, &bit_rate);
+                ret = avpriv_mpa_decode_header2(state, &sr, &channels, &frame_size, &bit_rate, &codec_id);
                 if (ret < 4) {
                     if (i > 4)
                         s->header_count = -2;
@@ -76,10 +78,11 @@ static int mpegaudio_parse(AVCodecParserContext *s1,
                     s->header= state;
                     s->frame_size = ret-4;
 
-                    if (s->header_count > 0) {
+                    if (s->header_count > 0 + (avctx->codec_id != AV_CODEC_ID_NONE && avctx->codec_id != codec_id)) {
                         avctx->sample_rate= sr;
                         avctx->channels   = channels;
                         s1->duration      = frame_size;
+                        avctx->codec_id   = codec_id;
                         if (s->no_bitrate || !avctx->bit_rate) {
                             s->no_bitrate = 1;
                             avctx->bit_rate += (bit_rate - avctx->bit_rate) / s->header_count;
@@ -106,7 +109,7 @@ static int mpegaudio_parse(AVCodecParserContext *s1,
 
 
 AVCodecParser ff_mpegaudio_parser = {
-    .codec_ids      = { CODEC_ID_MP1, CODEC_ID_MP2, CODEC_ID_MP3 },
+    .codec_ids      = { AV_CODEC_ID_MP1, AV_CODEC_ID_MP2, AV_CODEC_ID_MP3 },
     .priv_data_size = sizeof(MpegAudioParseContext),
     .parser_parse   = mpegaudio_parse,
     .parser_close   = ff_parse_close,

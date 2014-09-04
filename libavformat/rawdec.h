@@ -26,22 +26,14 @@
 #include "libavutil/log.h"
 #include "libavutil/opt.h"
 
-typedef struct RawAudioDemuxerContext {
-    AVClass *class;
-    int sample_rate;
-    int channels;
-} RawAudioDemuxerContext;
-
 typedef struct FFRawVideoDemuxerContext {
     const AVClass *class;     /**< Class for private options. */
     char *video_size;         /**< String describing video size, set by a private option. */
     char *pixel_format;       /**< Set by a private option. */
-    char *framerate;          /**< String describing framerate, set by a private option. */
+    AVRational framerate;     /**< AVRational describing framerate, set by a private option. */
 } FFRawVideoDemuxerContext;
 
 extern const AVOption ff_rawvideo_options[];
-
-int ff_raw_read_header(AVFormatContext *s);
 
 int ff_raw_read_partial_packet(AVFormatContext *s, AVPacket *pkt);
 
@@ -57,7 +49,7 @@ static const AVClass name ## _demuxer_class = {\
     .version    = LIBAVUTIL_VERSION_INT,\
 };
 
-#define FF_DEF_RAWVIDEO_DEMUXER(shortname, longname, probe, ext, id)\
+#define FF_DEF_RAWVIDEO_DEMUXER2(shortname, longname, probe, ext, id, flag)\
 FF_RAWVIDEO_DEMUXER_CLASS(shortname)\
 AVInputFormat ff_ ## shortname ## _demuxer = {\
     .name           = #shortname,\
@@ -66,10 +58,13 @@ AVInputFormat ff_ ## shortname ## _demuxer = {\
     .read_header    = ff_raw_video_read_header,\
     .read_packet    = ff_raw_read_partial_packet,\
     .extensions     = ext,\
-    .flags          = AVFMT_GENERIC_INDEX,\
+    .flags          = flag,\
     .raw_codec_id   = id,\
     .priv_data_size = sizeof(FFRawVideoDemuxerContext),\
     .priv_class     = &shortname ## _demuxer_class,\
 };
+
+#define FF_DEF_RAWVIDEO_DEMUXER(shortname, longname, probe, ext, id)\
+FF_DEF_RAWVIDEO_DEMUXER2(shortname, longname, probe, ext, id, AVFMT_GENERIC_INDEX)
 
 #endif /* AVFORMAT_RAWDEC_H */

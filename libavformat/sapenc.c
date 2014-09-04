@@ -23,7 +23,9 @@
 #include "libavutil/parseutils.h"
 #include "libavutil/random_seed.h"
 #include "libavutil/avstring.h"
+#include "libavutil/dict.h"
 #include "libavutil/intreadwrite.h"
+#include "libavutil/time.h"
 #include "internal.h"
 #include "network.h"
 #include "os_support.h"
@@ -75,6 +77,7 @@ static int sap_write_header(AVFormatContext *s)
     struct sockaddr_storage localaddr;
     socklen_t addrlen = sizeof(localaddr);
     int udp_fd;
+    AVDictionaryEntry* title = av_dict_get(s->metadata, "title", NULL, 0);
 
     if (!ff_network_init())
         return AVERROR(EIO);
@@ -137,7 +140,8 @@ static int sap_write_header(AVFormatContext *s)
         goto fail;
     }
 
-    s->start_time_realtime = av_gettime();
+    if (s->start_time_realtime == 0  ||  s->start_time_realtime == AV_NOPTS_VALUE)
+        s->start_time_realtime = av_gettime();
     for (i = 0; i < s->nb_streams; i++) {
         URLContext *fd;
 
@@ -150,10 +154,16 @@ static int sap_write_header(AVFormatContext *s)
             ret = AVERROR(EIO);
             goto fail;
         }
-        s->streams[i]->priv_data = contexts[i] =
-            ff_rtp_chain_mux_open(s, s->streams[i], fd, 0);
+        ret = ff_rtp_chain_mux_open(&contexts[i], s, s->streams[i], fd, 0, i);
+        if (ret < 0)
+            goto fail;
+        s->streams[i]->priv_data = contexts[i];
+        s->streams[i]->time_base = contexts[i]->streams[0]->time_base;
         av_strlcpy(contexts[i]->filename, url, sizeof(contexts[i]->filename));
     }
+
+    if (s->nb_streams > 0 && title)
+        av_dict_set(&contexts[0]->metadata, "title", title->value, 0);
 
     ff_url_join(url, sizeof(url), "udp", NULL, announce_addr, port,
                 "?ttl=%d&connect=1", ttl);
@@ -209,7 +219,7 @@ static int sap_write_header(AVFormatContext *s)
     pos += strlen(&sap->ann[pos]) + 1;
 
     if (av_sdp_create(contexts, s->nb_streams, &sap->ann[pos],
-                       sap->ann_size - pos)) {
+                      sap->ann_size - pos)) {
         ret = AVERROR_INVALIDDATA;
         goto fail;
     }
@@ -236,7 +246,7 @@ static int sap_write_packet(AVFormatContext *s, AVPacket *pkt)
 {
     AVFormatContext *rtpctx;
     struct SAPState *sap = s->priv_data;
-    int64_t now = av_gettime();
+    int64_t now = av_gettime_relative();
 
     if (!sap->last_time || now - sap->last_time > 5000000) {
         int ret = ffurl_write(sap->ann_fd, sap->ann, sap->ann_size);
@@ -251,10 +261,10 @@ static int sap_write_packet(AVFormatContext *s, AVPacket *pkt)
 
 AVOutputFormat ff_sap_muxer = {
     .name              = "sap",
-    .long_name         = NULL_IF_CONFIG_SMALL("SAP output format"),
+    .long_name         = NULL_IF_CONFIG_SMALL("SAP output"),
     .priv_data_size    = sizeof(struct SAPState),
-    .audio_codec       = CODEC_ID_AAC,
-    .video_codec       = CODEC_ID_MPEG4,
+    .audio_codec       = AV_CODEC_ID_AAC,
+    .video_codec       = AV_CODEC_ID_MPEG4,
     .write_header      = sap_write_header,
     .write_packet      = sap_write_packet,
     .write_trailer     = sap_write_close,
