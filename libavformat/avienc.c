@@ -276,10 +276,6 @@ static int avi_write_header(AVFormatContext *s)
         if (enc->codec_id == AV_CODEC_ID_XSUB)
             au_scale = au_byterate = 0;
 
-        avpriv_set_pts_info(s->streams[i], 64, au_scale, au_byterate);
-        if(stream->codec_id == CODEC_ID_XSUB)
-            au_scale = au_byterate = 0;
-
         avio_wl32(pb, au_scale); /* scale */
         avio_wl32(pb, au_byterate); /* rate */
 
