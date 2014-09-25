@@ -2287,7 +2287,8 @@ static void estimate_timings_from_bit_rate(AVFormatContext *ic)
     if (ic->duration == AV_NOPTS_VALUE &&
         ic->bit_rate != 0) {
         filesize = ic->pb ? avio_size(ic->pb) : 0;
-        if (filesize > 0) {
+        if (filesize > ic->data_offset) {
+            filesize -= ic->data_offset;
             for (i = 0; i < ic->nb_streams; i++) {
                 st      = ic->streams[i];
                 if (   st->time_base.num <= INT64_MAX / ic->bit_rate
@@ -3547,7 +3548,7 @@ void avformat_close_input(AVFormatContext **ps)
     s  = *ps;
     pb = s->pb;
 
-    if ((s->iformat && s->iformat->flags & AVFMT_NOFILE) ||
+    if ((s->iformat && strcmp(s->iformat->name, "image2") && s->iformat->flags & AVFMT_NOFILE) ||
         (s->flags & AVFMT_FLAG_CUSTOM_IO))
         pb = NULL;
 

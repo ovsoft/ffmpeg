@@ -145,6 +145,7 @@ Component options:
   --disable-mdct           disable MDCT code
   --disable-rdft           disable RDFT code
   --disable-fft            disable FFT code
+  --disable-faan           disable floating point AAN (I)DCT code
   --disable-pixelutils     disable pixel utils in libavutil
 
 Hardware accelerators:
@@ -1243,7 +1244,7 @@ check_host_cpp(){
     log check_host_cpp "$@"
     cat > $TMPC
     log_file $TMPC
-    check_cmd $host_cc $HOSTCPPFLAGS $HOSTCFLAGS "$@" $(hostcc_e $TMPO) $TMPC
+    check_cmd $host_cc $host_cppflags $host_cflags "$@" $(hostcc_e $TMPO) $TMPC
 }
 
 check_host_cppflags(){
@@ -1449,6 +1450,7 @@ SUBSYSTEM_LIST="
     dct
     dwt
     error_resilience
+    faan
     fast_unaligned
     fft
     lsp
@@ -1823,6 +1825,8 @@ CONFIG_EXTRA="
     cabac
     dvprofile
     exif
+    faandct
+    faanidct
     fdctdsp
     frame_thread_encoder
     gcrypt
@@ -1863,6 +1867,7 @@ CONFIG_EXTRA="
     tpeldsp
     videodsp
     vp3dsp
+    wma_freqs
 "
 
 CMDLINE_SELECT="
@@ -2023,6 +2028,8 @@ threads_if_any="$THREADS_LIST"
 # subsystems
 dct_select="rdft"
 error_resilience_select="me_cmp"
+faandct_deps="faan fdctdsp"
+faanidct_deps="faan idctdsp"
 frame_thread_encoder_deps="encoders threads"
 intrax8_select="error_resilience"
 mdct_select="fft"
@@ -2059,8 +2066,8 @@ atrac3_decoder_select="mdct"
 atrac3p_decoder_select="mdct sinewin"
 avrn_decoder_select="exif"
 bink_decoder_select="blockdsp hpeldsp"
-binkaudio_dct_decoder_select="mdct rdft dct sinewin"
-binkaudio_rdft_decoder_select="mdct rdft sinewin"
+binkaudio_dct_decoder_select="mdct rdft dct sinewin wma_freqs"
+binkaudio_rdft_decoder_select="mdct rdft sinewin wma_freqs"
 cavs_decoder_select="blockdsp golomb h264chroma idctdsp qpeldsp videodsp"
 cllc_decoder_select="bswapdsp"
 comfortnoise_encoder_select="lpc"
@@ -2215,11 +2222,11 @@ vp8_decoder_select="h264pred videodsp"
 vp9_decoder_select="videodsp vp9_parser"
 webp_decoder_select="vp8_decoder"
 wmalossless_decoder_select="llauddsp"
-wmapro_decoder_select="mdct sinewin"
-wmav1_decoder_select="mdct sinewin"
-wmav1_encoder_select="mdct sinewin"
-wmav2_decoder_select="mdct sinewin"
-wmav2_encoder_select="mdct sinewin"
+wmapro_decoder_select="mdct sinewin wma_freqs"
+wmav1_decoder_select="mdct sinewin wma_freqs"
+wmav1_encoder_select="mdct sinewin wma_freqs"
+wmav2_decoder_select="mdct sinewin wma_freqs"
+wmav2_encoder_select="mdct sinewin wma_freqs"
 wmavoice_decoder_select="lsp rdft dct mdct sinewin"
 wmv1_decoder_select="h263_decoder"
 wmv1_encoder_select="h263_encoder"
@@ -2692,6 +2699,7 @@ enable stripping
 enable asm
 enable debug
 enable doc
+enable faan faandct faanidct
 enable optimizations
 enable runtime_cpudetect
 enable safe_bitstream_reader
@@ -3834,6 +3842,7 @@ elif enabled x86; then
     case $cpu in
         i[345]86|pentium)
             cpuflags="-march=$cpu"
+            disable i686
             disable mmx
         ;;
         # targets that do NOT support nopl and conditional mov (cmov)

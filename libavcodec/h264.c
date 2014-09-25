@@ -248,7 +248,7 @@ const uint8_t *ff_h264_decode_nal(H264Context *h, const uint8_t *src,
 
 #define STARTCODE_TEST                                                  \
     if (i + 2 < length && src[i + 1] == 0 && src[i + 2] <= 3) {         \
-        if (src[i + 2] != 3) {                                          \
+        if (src[i + 2] != 3 && src[i + 2] != 0) {                       \
             /* startcode, so we must be past the end */                 \
             length = i;                                                 \
         }                                                               \
@@ -320,7 +320,7 @@ const uint8_t *ff_h264_decode_nal(H264Context *h, const uint8_t *src,
         if (src[si + 2] > 3) {
             dst[di++] = src[si++];
             dst[di++] = src[si++];
-        } else if (src[si] == 0 && src[si + 1] == 0) {
+        } else if (src[si] == 0 && src[si + 1] == 0 && src[si + 2] != 0) {
             if (src[si + 2] == 3) { // escape
                 dst[di++]  = 0;
                 dst[di++]  = 0;
@@ -431,8 +431,8 @@ int ff_h264_alloc_tables(H264Context *h)
     const int row_mb_num = 2*h->mb_stride*FFMAX(h->avctx->thread_count, 1);
     int x, y, i;
 
-    FF_ALLOCZ_OR_GOTO(h->avctx, h->intra4x4_pred_mode,
-                      row_mb_num * 8 * sizeof(uint8_t), fail)
+    FF_ALLOCZ_ARRAY_OR_GOTO(h->avctx, h->intra4x4_pred_mode,
+                      row_mb_num, 8 * sizeof(uint8_t), fail)
     FF_ALLOCZ_OR_GOTO(h->avctx, h->non_zero_count,
                       big_mb_num * 48 * sizeof(uint8_t), fail)
     FF_ALLOCZ_OR_GOTO(h->avctx, h->slice_table_base,
@@ -441,10 +441,10 @@ int ff_h264_alloc_tables(H264Context *h)
                       big_mb_num * sizeof(uint16_t), fail)
     FF_ALLOCZ_OR_GOTO(h->avctx, h->chroma_pred_mode_table,
                       big_mb_num * sizeof(uint8_t), fail)
-    FF_ALLOCZ_OR_GOTO(h->avctx, h->mvd_table[0],
-                      16 * row_mb_num * sizeof(uint8_t), fail);
-    FF_ALLOCZ_OR_GOTO(h->avctx, h->mvd_table[1],
-                      16 * row_mb_num * sizeof(uint8_t), fail);
+    FF_ALLOCZ_ARRAY_OR_GOTO(h->avctx, h->mvd_table[0],
+                      row_mb_num, 16 * sizeof(uint8_t), fail);
+    FF_ALLOCZ_ARRAY_OR_GOTO(h->avctx, h->mvd_table[1],
+                      row_mb_num, 16 * sizeof(uint8_t), fail);
     FF_ALLOCZ_OR_GOTO(h->avctx, h->direct_table,
                       4 * big_mb_num * sizeof(uint8_t), fail);
     FF_ALLOCZ_OR_GOTO(h->avctx, h->list_counts,
@@ -499,10 +499,10 @@ int ff_h264_context_init(H264Context *h)
     int yc_size = y_size + 2   * c_size;
     int x, y, i;
 
-    FF_ALLOCZ_OR_GOTO(h->avctx, h->top_borders[0],
-                      h->mb_width * 16 * 3 * sizeof(uint8_t) * 2, fail)
-    FF_ALLOCZ_OR_GOTO(h->avctx, h->top_borders[1],
-                      h->mb_width * 16 * 3 * sizeof(uint8_t) * 2, fail)
+    FF_ALLOCZ_ARRAY_OR_GOTO(h->avctx, h->top_borders[0],
+                      h->mb_width, 16 * 3 * sizeof(uint8_t) * 2, fail)
+    FF_ALLOCZ_ARRAY_OR_GOTO(h->avctx, h->top_borders[1],
+                      h->mb_width, 16 * 3 * sizeof(uint8_t) * 2, fail)
 
     h->ref_cache[0][scan8[5]  + 1] =
     h->ref_cache[0][scan8[7]  + 1] =
